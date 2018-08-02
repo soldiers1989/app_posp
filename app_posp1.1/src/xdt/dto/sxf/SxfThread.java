@@ -94,6 +94,7 @@ public class SxfThread extends Thread {
 				log.info("随行付查询上传参数"+reqStr);
 				log.info("随行付查询发送地址"+url);
 				String body=HttpClientUtil.doPost(url,reqStr);
+				
 				JSONObject jsons =JSONObject.parseObject(body);
 				log.info("随行付查询返回参数1："+JSON.toJSONString(jsons));
 				log.info("随行付查询返回参数2"+jsons);
@@ -107,41 +108,22 @@ public class SxfThread extends Thread {
 				String resDataDecrypt = new String(debs,"UTF-8");
 				log.info("随行付resDataDecrypt："+JSON.toJSONString(resDataDecrypt));
 				if(!"000000".equals(jsons.get("resCode"))){
-					log.info("来了1");
-					resMap.put("resCode",jsons.get("resCode"));
-			        resMap.put("resMsg", jsons.get("resMsg"));
-			        log.info("随行付代付线性查询请求失败错误信息："+JSON.toJSONString(resMap));
-			        log.info("来了2");
-			        int ii =sxfServiceImpl.UpdateDaifu(results.get("reqId"), "01");
-			        payRequsest.setReqId(results.get("reqId")+"/A");
-					surplus = surplus+Double.parseDouble(results.get("payAmt"));
-					merchantinfo.setPositionT1(surplus.toString());
-					ii =sxfServiceImpl.add(payRequsest, merchantinfo, results, "00");
-					log.info("添加失败订单3："+ii);
-					map.put("mercId", payRequsest.getClientId());
-					map.put("payMoney",payRequsest.getPayAmt());
-					int nus = pmsMerchantInfoDao.updataPayT1(map);
-					if(nus==1){
-						log.info("随行付***补款成功");
-					}
-			        log.info("修改订单状态："+ii);
+					
 				}else{
 					log.info("来了3");
 					JSONObject js =JSONObject.parseObject(resDataDecrypt);
 					log.info("随行付查询返回参数解析："+JSON.toJSONString(js));
 					
 					if("01".equals(js.get("tranSts"))){
-						log.info("200:"+results.get("reqId"));
-						int ii =sxfServiceImpl.UpdateDaifu(results.get("reqId"), "200");
-						log.info("修改订单状态："+ii);
+						
 					}else if("00".equals(js.get("tranSts"))){
 						log.info("00:"+results.get("reqId"));
 						int ii =sxfServiceImpl.UpdateDaifu(results.get("reqId"), "00");
 						log.info("修改订单状态："+ii);
 						return ;
-					}else if("03".equals(js.get("tranSts"))){
+					}else if("02".equals(js.get("tranSts"))){
 						log.info("01:"+results.get("reqId"));
-						int ii =sxfServiceImpl.UpdateDaifu(results.get("reqId"), "01");
+						int ii =sxfServiceImpl.UpdateDaifu(results.get("reqId"), "02");
 						log.info("修改订单状态："+ii);
 						payRequsest.setReqId(results.get("reqId")+"/A");
 						surplus = surplus+Double.parseDouble(results.get("payAmt"));

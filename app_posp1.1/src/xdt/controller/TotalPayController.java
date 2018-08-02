@@ -68,6 +68,7 @@ import xdt.service.ITotalPayService;
 import xdt.util.BeanToMapUtil;
 import xdt.util.DSDES;
 import xdt.util.HttpURLConection;
+import xdt.util.XmlToMap;
 
 /**
  * @author 作者 E-mail: 代付设置总路由
@@ -1298,6 +1299,7 @@ public class TotalPayController extends BaseAction {
 						e.printStackTrace();
 					}
 				}else {
+					if(!"00".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())&&!"".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())) {
 					maps.put("v_status", "1001");
 					maps.put("v_msg", result_msg);
 					try {
@@ -1336,7 +1338,16 @@ public class TotalPayController extends BaseAction {
 					}else {
 						log.info("银生宝代付补款失败");
 					}
+					}else {
+						try {
+							service.UpdateDaifu(orderId, "02");
+						} catch (Exception e) {
+							log.info("国付宝修改失败代付状态异常："+e);
+							e.printStackTrace();
+						}
+					  }
 				}
+				
 				ScanCodeResponseEntity consume = (ScanCodeResponseEntity) BeanToMapUtil
 						.convertMap(ScanCodeResponseEntity.class, maps);
 				String signs = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
@@ -1598,6 +1609,7 @@ public class TotalPayController extends BaseAction {
 							e.printStackTrace();
 						}
 					}else {
+						if(!"00".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())&&!"".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())) {
 						maps.put("v_status", "1001");
 						maps.put("v_msg", respMap.get("errtext"));
 						try {
@@ -1636,6 +1648,14 @@ public class TotalPayController extends BaseAction {
 						}else {
 							log.info("银盈通代付补款失败");
 						}
+					  }else {
+						try {
+							service.UpdateDaifu(respMap.get("dsorderid"), "02");
+						} catch (Exception e) {
+							log.info("国付宝修改失败代付状态异常："+e);
+							e.printStackTrace();
+						}
+					  }
 					}
 					ScanCodeResponseEntity consume = (ScanCodeResponseEntity) BeanToMapUtil
 							.convertMap(ScanCodeResponseEntity.class, maps);
@@ -1688,7 +1708,152 @@ public class TotalPayController extends BaseAction {
 		}
 	}
 	
-	
+	/**
+	 * 国付宝异步
+	 * @param response
+	 * @param request
+	 */
+	@RequestMapping(value="gfbNotifyUrl")
+	public void gfbNotifyUrl(HttpServletResponse response,HttpServletRequest request) {
+		log.info("国付宝代付异步来了！");
+		BufferedReader br;
+		String notifyMsg = request.getParameter("notifyMsg") ;
+		log.info("异步参数："+notifyMsg);
+		Map<String, String> maps =new HashMap<>();
+		request.getSession();
+		Map<String, String> map1=new HashMap<>();
+		
+		if(notifyMsg!=""&&notifyMsg!=null) {
+				try {
+					outString(response, "RespCode=0000");
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				Map<String, String> xmlTomap =XmlToMap.strXmlToMap(notifyMsg);
+				
+				PmsDaifuMerchantInfo pmsDaifuMerchantInfo =new PmsDaifuMerchantInfo();
+				pmsDaifuMerchantInfo.setBatchNo(xmlTomap.get("merOrderNum"));
+				List<PmsDaifuMerchantInfo> pmsDaifuMerchantInfos =service.selectDaifu(pmsDaifuMerchantInfo);
+					ChannleMerchantConfigKey keyinfo=new ChannleMerchantConfigKey();
+					OriginalOrderInfo originalInfo=null;
+					try {
+						originalInfo  = this.gateWayService.getOriginOrderInfos(xmlTomap.get("merOrderNum"));
+						keyinfo = clientCollectionPayService.getChannelConfigKey(originalInfo.getPid());
+					} catch (Exception e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+					log.info("国付宝订单数据:" + JSON.toJSON(originalInfo));
+					
+					log.info("国付宝下游的异步地址" + originalInfo.getBgUrl());
+					maps.put("v_mid", originalInfo.getPid());
+					maps.put("v_oid", originalInfo.getOrderId());
+					maps.put("v_txnAmt", originalInfo.getOrderAmount());
+					maps.put("v_attach", originalInfo.getAttach());
+					maps.put("v_code", "00");
+					maps.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+					maps.put("v_status", "200");
+					maps.put("v_msg", "代付成功");
+					if("8".equals(xmlTomap.get("respCode"))) {
+						maps.put("v_status", "0000");
+						maps.put("v_msg", "代付成功");
+						try {
+							service.UpdateDaifu(xmlTomap.get("merOrderNum"), "00");
+						} catch (Exception e) {
+							log.info("国付宝修改成功代付状态异常："+e);
+							e.printStackTrace();
+						}
+					}else if("1".equals(xmlTomap.get("respCode"))||"4".equals(xmlTomap.get("respCode"))||"5".equals(xmlTomap.get("respCode"))||"7".equals(xmlTomap.get("respCode"))||"6".equals(xmlTomap.get("respCode"))){
+						if(!"00".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())&&!"".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())) {
+							maps.put("v_status", "1001");
+							maps.put("v_msg", xmlTomap.get("msgExt"));
+							try {
+								service.UpdateDaifu(xmlTomap.get("merOrderNum"), "02");
+							} catch (Exception e) {
+								log.info("国付宝修改失败代付状态异常："+e);
+								e.printStackTrace();
+							}
+							Map<String, String> map =new HashMap<>();
+							map.put("machId",originalInfo.getPid());
+							map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))*100+"");
+							int nus =service.updataPay(map);
+							if(nus==1) {
+								log.info("国付宝代付补款成功");
+								DaifuRequestEntity entity =new DaifuRequestEntity();
+				 				entity.setV_mid(pmsDaifuMerchantInfos.get(0).getMercId());
+				 				entity.setV_batch_no(pmsDaifuMerchantInfos.get(0).getBatchNo()+"/A");
+				 				entity.setV_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+				 				entity.setV_sum_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+				 				entity.setV_identity(pmsDaifuMerchantInfos.get(0).getIdentity());
+				 				entity.setV_cardNo(pmsDaifuMerchantInfos.get(0).getCardno());
+				 				entity.setV_city(pmsDaifuMerchantInfos.get(0).getCity());
+				 				entity.setV_province(pmsDaifuMerchantInfos.get(0).getProvince());
+				 				entity.setV_type("0");
+				 				entity.setV_pmsBankNo(pmsDaifuMerchantInfos.get(0).getPmsbankno());
+				 				PmsMerchantInfo merchantinfo =new PmsMerchantInfo();
+								int ii;
+								try {
+									ii = service.add(entity, merchantinfo, maps, "00");
+									log.info("国付宝补款订单状态："+ii);
+								} catch (Exception e) {
+									log.info("国付宝补款状态异常："+e);
+									e.printStackTrace();
+								}
+								
+							}else {
+								log.info("国付宝代付补款失败");
+							}
+						}else {
+							try {
+								service.UpdateDaifu(xmlTomap.get("merOrderNum"), "02");
+							} catch (Exception e) {
+								log.info("国付宝修改失败代付状态异常："+e);
+								e.printStackTrace();
+							}
+						}
+						
+					}
+					ScanCodeResponseEntity consume = (ScanCodeResponseEntity) BeanToMapUtil
+							.convertMap(ScanCodeResponseEntity.class, maps);
+					String signs = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
+					maps.put("v_sign", signs);
+					String params = HttpURLConection.parseParams(maps);
+					log.info("国付宝代付给下游同步的数据:" + params);
+					String html;
+					try {
+						html = HttpClientUtil.post(originalInfo.getBgUrl(), params);
+						logger.info("下游返回状态" + html);
+						JSONObject ob = JSONObject.fromObject(html);
+						Iterator it = ob.keys();
+						Map<String, String> resp = new HashMap<>();
+						while (it.hasNext()) {
+							String keys = (String) it.next();
+							if (keys.equals("success")) {
+								String value = ob.getString(keys);
+								logger.info("异步回馈的结果:"+ value);
+								resp.put("success", value);
+							}
+						}
+						if (!resp.get("success").equals("true")) {
+		
+							logger.info("启动线程进行异步通知");
+							// 启线程进行异步通知
+							ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(), params));
+							logger.info("国付宝代付向下游 发送数据成功");
+						}
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+		}else {
+			try {
+				outString(response, "RespCode=9999");
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+	}
 	
 	@RequestMapping(value="jmNotifyUrl")
 	public void jmNotifyUrl(HttpServletResponse response,HttpServletRequest request) {

@@ -1301,7 +1301,7 @@ public class GateWayController extends BaseAction {
 				result.put("v_mid", originalInfo.getPid());
 				result.put("v_msg", "请求成功");
 				if ("01".equals(synchNotifyParams.get("transStatus"))) {
-					if("000001110100000663".equals(request.getParameter("merchantId"))) {
+					/*if("000001110100000663".equals(request.getParameter("merchantId"))) {
 						int ii =0;
 						if("10036048439".equals(originalInfo.getPid())||"10032051737".equals(originalInfo.getPid())||"10032057782".equals(originalInfo.getPid())||"10037295627".equals(originalInfo.getPid())
 								||"10037293512".equals(originalInfo.getPid())||"10052245878".equals(originalInfo.getPid())||"10052241126".equals(originalInfo.getPid())||"10051292767".equals(originalInfo.getPid())
@@ -1312,7 +1312,7 @@ public class GateWayController extends BaseAction {
 						}
 						
 						 log.info("裕福实时入金状态:"+ii);
-					}
+					}*/
 					result.put("v_status", "0000");
 					result.put("v_status_msg", "支付成功");
 				} else if ("02".equals(synchNotifyParams.get("transStatus"))) {
