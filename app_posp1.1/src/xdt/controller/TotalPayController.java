@@ -745,7 +745,7 @@ public class TotalPayController extends BaseAction {
 				ConsumeResponseEntity consume = (ConsumeResponseEntity) BeanToMapUtil
 						.convertMap(ConsumeResponseEntity.class, results);
 				String sign = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
-				result.put("v_sign", sign);
+				results.put("v_sign", sign);
 				String params = HttpURLConection.parseParams(results);
 				log.info("给下游同步的数据:" + params);
 				String html =HttpClientUtil.post(originalInfo.getBgUrl(),params);
@@ -760,18 +760,18 @@ public class TotalPayController extends BaseAction {
 				 logger.info("异步回馈的结果:" + "\t" + value);
 				 resp.put("success", value);}
 				 }
-				 if (resp.get("success").equals("false")) {
+				 if (!resp.get("success").equals("true")) {
 				
 				 logger.info("启动线程进行异步通知");
 				 // 启线程进行异步通知
 				 ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(),params));
 				 logger.info("向下游 发送数据成功");
-				
+				 }
 			} else {
 				str = "FAIL";
 				outString(response, str);
 			}
-		  }
+		  
 		} catch (Exception e) {
 			
 			e.printStackTrace();
@@ -921,7 +921,7 @@ public class TotalPayController extends BaseAction {
 					ConsumeResponseEntity consume = (ConsumeResponseEntity) BeanToMapUtil
 							.convertMap(ConsumeResponseEntity.class, results);
 					String sign = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
-					result.put("v_sign", sign);
+					results.put("v_sign", sign);
 					String params = HttpURLConection.parseParams(results);
 					log.info("实时单笔给下游同步的数据:" + params);
 					String html =HttpClientUtil.post(originalInfo.getBgUrl(),params);
@@ -942,12 +942,12 @@ public class TotalPayController extends BaseAction {
 					 // 启线程进行异步通知
 					 ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(),params));
 					 logger.info("向下游 发送数据成功");
-					
+					 }
 				} else {
 					str = "FAIL";
 					outString(response, str);
 				}
-			  }
+			 
 			} catch (Exception e) {
 				
 				e.printStackTrace();
