@@ -7,13 +7,16 @@ import java.beans.PropertyDescriptor;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
+import java.net.URL;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.security.interfaces.RSAPublicKey;
@@ -1143,12 +1146,20 @@ public class GateWayController extends BaseAction {
 						result.remove("v_msg");
 						result.remove("v_code");
 						logger.info("国付宝网关上送的数据:" + result);
-						request.setCharacterEncoding("GBK");
+						/*request.setCharacterEncoding("GBK");
 						request.setAttribute("temp", result);
 						request.getSession();
 						request.getRemoteAddr();
+						response.addHeader("referer", "http://www.maijie1349.com");
+						response.setHeader("referer", "http://www.maijie1349.com");
 						String paths="https://gateway.gopay.com.cn/Trans/WebClientAction.do?"+HttpURLConection.parseParams(result);
-						response.sendRedirect(paths.replaceAll("", ""));
+						response.sendRedirect(paths.replaceAll("", ""));*/
+						result.put("url", "https://gateway.gopay.com.cn/Trans/WebClientAction.do");
+						request.setAttribute("temp", result);
+						request.getRequestDispatcher("/gateway_submit2.jsp").forward(request, response);
+						/*html = EffersonPayService.createAutoFormHtml(
+								"https://gateway.gopay.com.cn/Trans/WebClientAction.do", result, "UTF-8");
+						outString(response, html);*/
 						break;
 					default:
 						break;
