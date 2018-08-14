@@ -1716,12 +1716,10 @@ public class TotalPayController extends BaseAction {
 	@RequestMapping(value="gfbNotifyUrl")
 	public void gfbNotifyUrl(HttpServletResponse response,HttpServletRequest request) {
 		log.info("国付宝代付异步来了！");
-		BufferedReader br;
 		String notifyMsg = request.getParameter("notifyMsg") ;
 		log.info("异步参数："+notifyMsg);
 		Map<String, String> maps =new HashMap<>();
 		request.getSession();
-		Map<String, String> map1=new HashMap<>();
 		
 		if(notifyMsg!=""&&notifyMsg!=null) {
 				try {
@@ -1734,13 +1732,19 @@ public class TotalPayController extends BaseAction {
 				PmsDaifuMerchantInfo pmsDaifuMerchantInfo =new PmsDaifuMerchantInfo();
 				pmsDaifuMerchantInfo.setBatchNo(xmlTomap.get("merOrderNum"));
 				List<PmsDaifuMerchantInfo> pmsDaifuMerchantInfos =service.selectDaifu(pmsDaifuMerchantInfo);
+				String type="";
+				if("D0".equals(pmsDaifuMerchantInfos.get(0).getRemarks())){
+					type="0";
+				}else if("T1".equals(pmsDaifuMerchantInfos.get(0).getRemarks())) {
+					type="1";
+				}
 					ChannleMerchantConfigKey keyinfo=new ChannleMerchantConfigKey();
 					OriginalOrderInfo originalInfo=null;
 					try {
 						originalInfo  = this.gateWayService.getOriginOrderInfos(xmlTomap.get("merOrderNum"));
 						keyinfo = clientCollectionPayService.getChannelConfigKey(originalInfo.getPid());
 					} catch (Exception e) {
-						// TODO Auto-generated catch block
+						
 						e.printStackTrace();
 					}
 					log.info("国付宝订单数据:" + JSON.toJSON(originalInfo));
@@ -1764,7 +1768,7 @@ public class TotalPayController extends BaseAction {
 							e.printStackTrace();
 						}
 					}else if("1".equals(xmlTomap.get("respCode"))||"4".equals(xmlTomap.get("respCode"))||"5".equals(xmlTomap.get("respCode"))||"7".equals(xmlTomap.get("respCode"))||"6".equals(xmlTomap.get("respCode"))){
-						if(!"00".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())&&!"".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())) {
+						if(!"02".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())||!"01".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())) {
 							maps.put("v_status", "1001");
 							maps.put("v_msg", xmlTomap.get("msgExt"));
 							try {
@@ -1776,7 +1780,12 @@ public class TotalPayController extends BaseAction {
 							Map<String, String> map =new HashMap<>();
 							map.put("machId",originalInfo.getPid());
 							map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))*100+"");
-							int nus =service.updataPay(map);
+							int nus =0;
+							if("0".equals(type)) {
+								nus =service.updataPay(map);
+							}else if("1".equals(type)){
+								nus =service.updataPayT1(map);
+							}
 							if(nus==1) {
 								log.info("国付宝代付补款成功");
 								DaifuRequestEntity entity =new DaifuRequestEntity();
@@ -1788,7 +1797,7 @@ public class TotalPayController extends BaseAction {
 				 				entity.setV_cardNo(pmsDaifuMerchantInfos.get(0).getCardno());
 				 				entity.setV_city(pmsDaifuMerchantInfos.get(0).getCity());
 				 				entity.setV_province(pmsDaifuMerchantInfos.get(0).getProvince());
-				 				entity.setV_type("0");
+				 				entity.setV_type(type);
 				 				entity.setV_pmsBankNo(pmsDaifuMerchantInfos.get(0).getPmsbankno());
 				 				PmsMerchantInfo merchantinfo =new PmsMerchantInfo();
 								int ii;
@@ -1802,13 +1811,6 @@ public class TotalPayController extends BaseAction {
 								
 							}else {
 								log.info("国付宝代付补款失败");
-							}
-						}else {
-							try {
-								service.UpdateDaifu(xmlTomap.get("merOrderNum"), "02");
-							} catch (Exception e) {
-								log.info("国付宝修改失败代付状态异常："+e);
-								e.printStackTrace();
 							}
 						}
 						
