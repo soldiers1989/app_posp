@@ -34,6 +34,7 @@ import java.util.Map.Entry;
 
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
+import net.sf.json.xml.XMLSerializer;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -95,7 +96,9 @@ import xdt.dto.cj.BaseConstant;
 import xdt.dto.cj.ChanPayUtil;
 import xdt.dto.cx.CXThread;
 import xdt.dto.cx.CXUtil;
+import xdt.dto.gateway.util.GopayUtils;
 import xdt.dto.hfb.Desede;
+import xdt.dto.hfb.HFBPayResponse;
 import xdt.dto.hfb.HeepayClient2;
 import xdt.dto.hfb.HfbUtil;
 import xdt.dto.hj.HJPayRequest;
@@ -143,6 +146,7 @@ import xdt.dto.tfb.TFBConfig;
 import xdt.dto.transfer_accounts.entity.BalanceRequestEntity;
 import xdt.dto.transfer_accounts.entity.DaifuQueryRequestEntity;
 import xdt.dto.transfer_accounts.entity.DaifuRequestEntity;
+import xdt.dto.transfer_accounts.util.CJThread;
 import xdt.dto.transfer_accounts.util.JHJThread;
 import xdt.dto.yb.YBThread;
 import xdt.dto.yb.YBUtil;
@@ -154,6 +158,7 @@ import xdt.dto.yf.DisburseClientUtil;
 import xdt.dto.yf.DoYf;
 import xdt.dto.yf.FileDownReq;
 import xdt.dto.yf.GsonUtil;
+import xdt.dto.yf.JaxbUtils;
 import xdt.dto.yf.MD5FileUtil;
 import xdt.dto.yf.OnePayRequest;
 import xdt.dto.yf.PayReq;
@@ -201,6 +206,8 @@ import xdt.util.JsdsUtil;
 import xdt.util.JsonUtil;
 import xdt.util.RSAUtil;
 import xdt.util.UtilDate;
+import xdt.util.XMLUtil;
+import xdt.util.XmlToMap;
 import xdt.util.utils.MD5Utils;
 import xdt.util.utils.RSAUtils;
 import xdt.util.utils.RequestUtils;
@@ -537,25 +544,25 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 							result = jsdsAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "SXF": // 随行付
-							result = sxfAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
+							//result = sxfAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "MBXHF":// 魔宝
 							result = moAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "TXZF":// 天下支付
-							result = tfbAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
+							//result = tfbAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "HFB":// 汇付宝
 							result = hfbAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "HJZF":// 汇聚（老）
-							result = hjPays(payRequest, result, merchantinfo, pmsBusinessPos);
+							result = hjPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "HLB":// 合利宝
 							if ("1".equals(payRequest.getV_accountType())) {
-								result = settlementCardWithdraw(payRequest, result);
+								//result = settlementCardWithdraw(payRequest, result);
 							} else if ("2".equals(payRequest.getV_accountType())) {
-								result = creditCardWithdraw(payRequest, result);
+								//result = creditCardWithdraw(payRequest, result);
 							}
 							break;
 						case "CJ":// 畅捷纯代付
@@ -570,7 +577,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						case "WZF001":// 沃支付
 						case "WZF002":// 沃支付
 						case "WZF003":// 沃支付
-							result = wzfAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
+							//result = wzfAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "JP":// 九派
 							jpPay(payRequest, result, merchantinfo, pmsBusinessPos);
@@ -597,13 +604,13 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 								yfPayOne(payRequest, result, merchantinfo, pmsBusinessPos);
 							}
 							break;
-						case "JBB":// 聚佰宝
+						case "JBB":// 
 							jbbPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
-						case "YSB":// 聚佰宝
+						case "YSB":// 
 							ysbPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
-						case "JHJ":// 聚佰宝
+						case "JHJ":// 
 							jhjPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "JMZFB":
@@ -617,6 +624,9 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 							break;
 						case "YSZF":
 							yszfPay(payRequest, result, merchantinfo, pmsBusinessPos);
+							break;
+						case "GFB":
+							gfbPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						default:
 							result.put("v_code", "17");
@@ -878,6 +888,18 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		this.log.info("状态值" + root.getChild("status").getText());
 		String status = root.getChild("status").getText();
 		log.info("代付状态:" + status);
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(status)) {
+			return result;
+		}
 		if ("0".equals(status)) {
 			String v_mid1 = pmsBusinessPos.getBusinessnum();
 			String v_data0 = payRequest.getV_identity();
@@ -1072,7 +1094,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						result.put("v_status", "200");
 						result.put("v_status_msg", "处理中");
 						UpdateDaifu(payRequest.getV_batch_no(), "200");
-					}else {
+					}else if("pl_transState=2".equals(signs1[3])){
 						log.info("又失败了3");
 						result.put("v_status", "1001");
 						result.put("v_status_msg", "代付失败");
@@ -1084,7 +1106,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						if (nus == 1) {
 							log.info("加款成功！！");
 							if(nus==1) {
-				 				log.info("oem汇聚代付补款成功");
+				 				log.info("江苏电商代付补款成功");
 				 				DaifuRequestEntity entity =new DaifuRequestEntity();
 				 				entity.setV_mid(payRequest.getV_mid());
 				 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
@@ -1116,7 +1138,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 					if (nus == 1) {
 						log.info("加款成功！！");
 						if(nus==1) {
-			 				log.info("oem汇聚代付补款成功");
+			 				log.info("江苏电商代付补款成功");
 			 				DaifuRequestEntity entity =new DaifuRequestEntity();
 			 				entity.setV_mid(payRequest.getV_mid());
 			 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
@@ -1129,7 +1151,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			 				entity.setV_type("0");
 			 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
 							int ii =add(entity, merchantinfo, result, "00");
-							log.info("oem汇聚补款订单状态："+ii);
+							log.info("江苏电商补款订单状态："+ii);
 			 			}
 						
 					}
@@ -1192,7 +1214,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						UpdateDaifu(payRequest.getV_batch_no(), "200");
 						result.put("v_status", "200");
 						result.put("v_status_msg", "处理中");
-					} else {
+					} else if("pl_transState=2".equals(signs1[3])){
 						log.info("又失败了3");
 						result.put("v_status", "1001");
 						result.put("v_status_msg", "代付失败");
@@ -1204,7 +1226,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						if (nus == 1) {
 							log.info("加款成功！！");
 							if(nus==1) {
-				 				log.info("oem汇聚代付补款成功");
+				 				log.info("江苏电商代付补款成功");
 				 				DaifuRequestEntity entity =new DaifuRequestEntity();
 				 				entity.setV_mid(payRequest.getV_mid());
 				 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
@@ -1217,7 +1239,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 				 				entity.setV_type("1");
 				 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
 								int ii =add(entity, merchantinfo, result, "00");
-								log.info("oem汇聚补款订单状态："+ii);
+								log.info("江苏电商补款订单状态："+ii);
 				 			}
 						}
 						
@@ -1234,7 +1256,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 					if (nus == 1) {
 						log.info("加款成功！！");
 						if(nus==1) {
-			 				log.info("oem汇聚代付补款成功");
+			 				log.info("江苏电商代付补款成功");
 			 				DaifuRequestEntity entity =new DaifuRequestEntity();
 			 				entity.setV_mid(payRequest.getV_mid());
 			 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
@@ -1247,7 +1269,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			 				entity.setV_type("1");
 			 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
 							int ii =add(entity, merchantinfo, result, "00");
-							log.info("oem汇聚补款订单状态："+ii);
+							log.info("江苏电商补款订单状态："+ii);
 			 			}
 					}
 					
@@ -1388,86 +1410,72 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			String body = HttpClientUtil.doPost(url, reqStr);
 			log.info("随行付***上游返回原始参数:" + JSON.toJSON(body));
 			log.info("随行付***HttpClient  ===结束");
-			if (body == null || "".equals(body) || "exception".equals(body)) {
-
-				payRequest.setV_batch_no(payRequest.getV_batch_no() + "/A");
-				surplus = surplus + Double.parseDouble(payRequest.getV_amount());
-				merchantinfo.setPositionT1(surplus.toString());
-				ii = add(payRequest, merchantinfo, result, "00");
-				map.put("mercId", payRequest.getV_batch_no());
-				map.put("payMoney", payRequest.getV_amount());
-				int nus = pmsMerchantInfoDao.updataPayT1(map);
-				if (nus == 1) {
-					log.info("随行付***补款成功");
-				}
-				result.put("respCode", "0002");
-				result.put("respMsg", "请求上游出现异常：" + body);
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount", payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+			if(!StringUtil.isNotEmpty(body)) {
 				return result;
 			}
 			PayResponse payResponse = JsonUtils.fromJson(body, PayResponse.class);
 			log.info("随行付***上游返回解析实体类参数:" + JSON.toJSON(payResponse));
-			if (!"000000".equals(payResponse.getResCode())) {
-				UpdateDaifu(payRequest.getV_batch_no(), "01");
-				payRequest.setV_batch_no(payRequest.getV_batch_no() + "/A");
-				surplus = surplus + Double.parseDouble(payRequest.getV_amount());
-				merchantinfo.setPositionT1(surplus.toString());
-				ii = add(payRequest, merchantinfo, result, "00");
-				map.put("mercId", payRequest.getV_batch_no());
-				map.put("payMoney", payRequest.getV_amount());
-				int nus = pmsMerchantInfoDao.updataPayT1(map);
-				if (nus == 1) {
-					log.info("随行付***补款成功");
+			if ("000000".equals(payResponse.getResCode())) {
+				String sign = payResponse.getSign();
+				String resData = payResponse.getResData();
+
+				String payPreKey = SXFUtil.publicPayKey;// mercPrivateKey,payPreKey
+				boolean signFlag = sign != null && StringUtils.isNotBlank(resData)
+						&& xdt.dto.sxf.RSAUtils.verify(resData, sign, payPreKey);
+				log.info("随行付***结果" + signFlag);
+				// if (!signFlag)
+				// System.out.println("签名验证失败");//根据实际业务修改
+				byte[] base64bs = Base64Utils.decode(resData);
+
+				// DES解密
+				byte[] debs = DESUtils.decrypt(base64bs, "12345678");
+
+				String resDataDecrypt = new String(debs, "UTF-8");
+				com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSONObject.parseObject(resDataDecrypt);
+				log.info("随行付状态:" + json.getString("payResultList"));
+				String s = json.getString("payResultList");
+				s = s.replace("[", "").replace("]", "");
+				com.alibaba.fastjson.JSONObject jsons = com.alibaba.fastjson.JSONObject.parseObject(s);
+				log.info("" + jsons.getString("resCd"));
+				result.put("v_mid", payRequest.getV_mid());
+				result.put("v_batch_no", payRequest.getV_batch_no());
+				result.put("v_code", "00");
+				result.put("v_msg", "请求成功");
+				result.put("v_sum_amount", payRequest.getV_sum_amount());
+				result.put("v_amount", payRequest.getV_amount());
+				result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+				result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+				result.put("v_type", payRequest.getV_type());
+				if ("01".equals(jsons.getString("resCd"))) {
+					log.info("随行付代付错误：" + jsons.getString("resMsg"));
+					payRequest.setV_batch_no(payRequest.getV_batch_no() + "/A");
+					surplus = surplus + Double.parseDouble(payRequest.getV_amount());
+					merchantinfo.setPositionT1(surplus.toString());
+					ii = add(payRequest, merchantinfo, result, "00");
+					map.put("mercId", payRequest.getV_batch_no());
+					map.put("payMoney", payRequest.getV_amount());
+					int nus = pmsMerchantInfoDao.updataPayT1(map);
+					if (nus == 1) {
+						log.info("随行付***补款成功");
+					}
+					result.put("v_code", "01");
+					result.put("v_msg", jsons.getString("resMsg"));
+					return result;
 				}
-				log.info("随行付代付返回状态吗错误");
-				result.put("respCode", "0001");
-				result.put("respMsg", "系统错误，代付失败");
-				return result;
+				ThreadPool.executor(new SxfThread(result, sxfService, pmsBusinessPos, surplus, pmsMerchantInfoDao));
+			}else {
+				ThreadPool.executor(new SxfThread(result, sxfService, pmsBusinessPos, surplus, pmsMerchantInfoDao));
 			}
-			String sign = payResponse.getSign();
-			String resData = payResponse.getResData();
-
-			String payPreKey = SXFUtil.publicPayKey;// mercPrivateKey,payPreKey
-			boolean signFlag = sign != null && StringUtils.isNotBlank(resData)
-					&& xdt.dto.sxf.RSAUtils.verify(resData, sign, payPreKey);
-			log.info("随行付***结果" + signFlag);
-			// if (!signFlag)
-			// System.out.println("签名验证失败");//根据实际业务修改
-			byte[] base64bs = Base64Utils.decode(resData);
-
-			// DES解密
-			byte[] debs = DESUtils.decrypt(base64bs, "12345678");
-
-			String resDataDecrypt = new String(debs, "UTF-8");
-			com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSONObject.parseObject(resDataDecrypt);
-			log.info("随行付状态:" + json.getString("payResultList"));
-			String s = json.getString("payResultList");
-			s = s.replace("[", "").replace("]", "");
-			com.alibaba.fastjson.JSONObject jsons = com.alibaba.fastjson.JSONObject.parseObject(s);
-			log.info("" + jsons.getString("resCd"));
-			if (!"00".equals(jsons.getString("resCd"))) {
-				log.info("随行付代付错误：" + jsons.getString("resMsg"));
-				payRequest.setV_batch_no(payRequest.getV_batch_no() + "/A");
-				surplus = surplus + Double.parseDouble(payRequest.getV_amount());
-				merchantinfo.setPositionT1(surplus.toString());
-				ii = add(payRequest, merchantinfo, result, "00");
-				map.put("mercId", payRequest.getV_batch_no());
-				map.put("payMoney", payRequest.getV_amount());
-				int nus = pmsMerchantInfoDao.updataPayT1(map);
-				if (nus == 1) {
-					log.info("随行付***补款成功");
-				}
-				result.put("respCode", "0001");
-				result.put("respMsg", jsons.getString("resMsg"));
-				return result;
-			}
-			UpdateDaifu(payRequest.getV_batch_no(), "200");
-			result.put("respCode", "0000");
-			result.put("respMsg", jsons.getString("resMsg"));
-			result.put("payItemId", payRequest.getV_identity());
-			result.put("clientId", payRequest.getV_mid());
-			result.put("reqId", payRequest.getV_batch_no());
-			result.put("payAmt", payRequest.getV_amount());
-			ThreadPool.executor(new SxfThread(result, sxfService, pmsBusinessPos, surplus, pmsMerchantInfoDao));
+			
 			return result;
 		} catch (Exception e1) {
 			e1.printStackTrace();
@@ -1553,10 +1561,22 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			// 断开连接
 			connection.disconnect();
 			System.out.println(sb);
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount", payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+			if(!StringUtil.isNotEmpty(sb)) {
+				return result;
+			}
 			ObjectMapper om = new ObjectMapper();
 			Map<String, Object> map1 = om.readValue(sb.toString(), Map.class);
 			log.info("魔宝代付返回状态参数：" + map1);
-
+			
 			if ("00".equals(map1.get("status"))) {
 				String data = map1.get("resBody").toString();
 				// 公钥证书解密
@@ -1755,6 +1775,18 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		log.info("上传前的参数：" + req);
 		String retStr = transferClient.execute(req);
 		System.out.println("转账申请，返回" + retStr);
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(retStr)) {
+			return result;
+		}
 		com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSONObject.parseObject(retStr);
 
 		if ("1".equals(json.getString("retCode"))) {
@@ -2100,6 +2132,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			log.info("算卡提现返回参数:" + JSON.toJSONString(resultMap));
 			String s = resultMap.get("response").toString();
 			System.out.println(s);
+			
 			com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSONObject.parseObject(s);
 			if ("0000".equals(json.getString("rt2_retCode"))) {
 				result.put("respCode", "00");
@@ -2260,38 +2293,53 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			data = data.substring(0, a + "[".length()) + data.substring(b, data.length());// 利用substring进行字符串截取
 		}
 
-		System.out.println(data);
+		
 		log.info("畅捷返回参数：" + JSON.toJSONString(data));
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(data)) {
+			return result;
+		}
 		Map<String, String> maps = JsonUtil.jsonToMap(data);
 
 		Map<String, String> m = new HashMap<>();
 		try {
-			if ("S".equals(maps.get("AcceptStatus")) && "0000".equals(maps.get("PlatformRetCode"))) {
-				if ("000000".equals(maps.get("OriginalRetCode"))) {
-					UpdateDaifu(payRequest.getV_batch_no(), "00");
-					result.put("respCode", "00");
-					result.put("respMsg", "交易受理成功");
-					result.put("state", "00");
-					result.put("message", maps.get("AppRetMsg") + "," + maps.get("OriginalErrorMessage"));
-					result.put("amount", payRequest.getV_amount());
-					result.put("orderId", payRequest.getV_batch_no());
-					result.put("merchantId", payRequest.getV_mid());
-				} else if ("111111".equals(maps.get("OriginalRetCode"))) {
-					UpdateDaifu(payRequest.getV_batch_no(), "01");
-					result.put("respCode", "00");
-					result.put("respMsg", "交易受理成功");
-					result.put("state", "01");
-					result.put("message", maps.get("AppRetMsg") + "," + maps.get("OriginalErrorMessage"));
-					result.put("amount", payRequest.getV_amount());
-					result.put("orderId", payRequest.getV_batch_no());
-					result.put("merchantId", payRequest.getV_mid());
+			if ("S".equals(maps.get("AcceptStatus"))) {
+				if("0000".equals(maps.get("PlatformRetCode"))) {
+					if ("000000".equals(maps.get("OriginalRetCode"))) {
+						UpdateDaifu(payRequest.getV_batch_no(), "00");
+					} else if ("111111".equals(maps.get("OriginalRetCode"))) {
+						UpdateDaifu(payRequest.getV_batch_no(), "02");
+						m.put("payMoney", payRequest.getV_amount());
+						m.put("machId", payRequest.getV_mid());
+						int nus = pmsMerchantInfoDao.updataPayT1(m);
+						if (nus == 1) {
+							log.info("畅捷***补款成功");
+							PmsMerchantInfo info = select(payRequest.getV_mid());
+							merchantinfo.setPosition(info.getPositionT1());
+							payRequest.setV_batch_no(payRequest.getV_batch_no() + "/A");
+							int id = add(payRequest, merchantinfo, result, "00");
+							if (id == 1) {
+								log.info("畅捷代付补单成功");
+							}
+						}
+					} else {
+						ThreadPool.executor(new CJThread(this,payRequest, merchantinfo));
+					}
+				}else if("1000".equals(maps.get("PlatformRetCode"))||"2004".equals(maps.get("PlatformRetCode"))||"2009".equals(maps.get("PlatformRetCode"))) {
+					UpdateDaifu(payRequest.getV_batch_no(), "02");
 					m.put("payMoney", payRequest.getV_amount());
 					m.put("machId", payRequest.getV_mid());
 					int nus = pmsMerchantInfoDao.updataPayT1(m);
 					if (nus == 1) {
 						log.info("畅捷***补款成功");
-						// surplus = surplus+Double.parseDouble(payRequest.getAmount());
-						// merchantinfo.setPosition(surplus.toString());
 						PmsMerchantInfo info = select(payRequest.getV_mid());
 						merchantinfo.setPosition(info.getPositionT1());
 						payRequest.setV_batch_no(payRequest.getV_batch_no() + "/A");
@@ -2300,24 +2348,12 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 							log.info("畅捷代付补单成功");
 						}
 					}
-				} else {
-					result.put("respCode", "00");
-					result.put("respMsg", "交易受理成功");
-					result.put("state", "200");
-					result.put("message", maps.get("AppRetMsg") + "," + maps.get("OriginalErrorMessage"));
-					result.put("amount", payRequest.getV_sum_amount());
-					result.put("orderId", payRequest.getV_batch_no());
-					result.put("merchantId", payRequest.getV_mid());
+				}else if("2000".equals(maps.get("PlatformRetCode"))) {
+					ThreadPool.executor(new CJThread(this,payRequest, merchantinfo));
 				}
-			} else {
+				
+			} else if("F".equals(maps.get("AcceptStatus")) ){
 				UpdateDaifu(payRequest.getV_batch_no(), "01");
-				result.put("respCode", "00");
-				result.put("respMsg", "交易受理成功");
-				result.put("state", "01");
-				result.put("message", maps.get("RetMsg") + ",交易失败");
-				result.put("amount", payRequest.getV_sum_amount());
-				result.put("orderId", payRequest.getV_batch_no());
-				result.put("merchantId", payRequest.getV_mid());
 				m.put("payMoney", payRequest.getV_sum_amount());
 				m.put("machId", payRequest.getV_mid());
 				int nus = pmsMerchantInfoDao.updataPayT1(m);
@@ -2449,6 +2485,18 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 
 			String jsonRsp = response.body().string();
 			System.out.println("jsonRsp: " + jsonRsp);
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount", payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+			if(!StringUtil.isNotEmpty(jsonRsp)) {
+				return result;
+			}
 			Map<String, String> m = new HashMap<>();
 			m.put("payMoney", amount1.toString());
 			m.put("machId", payRequest.getV_mid());
@@ -2606,7 +2654,18 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 				+ timestamp + "&sign=" + signstr;
 		String results = HttpsUtil.doSslPost("https://123.207.247.101/pay/unionpay/entrust/credit", postdata, "utf-8");
 		log.info("恒明返回参数：" + results);
-
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(results)) {
+			return result;
+		}
 		com.alibaba.fastjson.JSONObject responseObj = com.alibaba.fastjson.JSONObject.parseObject(results);
 		log.info("message:" + responseObj.get("message"));
 		if ("0".equals(responseObj.getString("ret"))) {
@@ -2830,6 +2889,18 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 
 		String res = MerchantUtil.sendAndRecv(url, buf, "UTF-8");
 		log.info("代付返回参数：" + res);
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(res)) {
+			return result;
+		}
 		Map<String, String> retMap = new LinkedHashMap<String, String>();
 		retMap.put("charset", (String) util.getValue(res, "charset"));
 		retMap.put("version", (String) util.getValue(res, "version"));
@@ -3098,6 +3169,18 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			e.printStackTrace();
 		}
 		log.info("代付返回参数：" + JSON.toJSON(results));
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(results)) {
+			return result;
+		}
 		com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSONObject.parseObject(results);
 
 		Map<String, String> m = new HashMap<>();
@@ -3209,6 +3292,18 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			e.printStackTrace();
 		}
 		log.info("代付返回参数："+JSON.toJSON(results));
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(results)) {
+			return result;
+		}
 		com.alibaba.fastjson.JSONObject json =com.alibaba.fastjson.JSONObject.parseObject(results);
 		
 		Map<String, String> m = new HashMap<>();
@@ -3407,7 +3502,18 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		String reqStr= JsonUtils.toJson(payParam);
 		log.info("甬易上送的数据:"+reqStr);
 		String reqData = HttpClientUtil.doPost("http://paymentapi.emaxcard.com/pay/AgentPayToCard", reqStr);
-       
+       if(!StringUtil.isNotEmpty(reqData)) {
+    	   result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount", payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_type", payRequest.getV_type());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", UtilDate.getDateFormatter());
+    	   return result;
+       }
          //json转成map
          Map map=JsonTools.parseJSON2Map(reqData);
           log.info("上游返回的数据:"+map);
@@ -3747,7 +3853,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	            res.parseXml(xmlRes);
 
 	            log.info("聚佰宝代付响应的状态码:" + res.getRspcod() + "聚佰宝代付响应的状态码描述:" + res.getRspmsg());
-	            if("B001".equals(res.getRspcod()))
+	            if("B001".equals(res.getRspcod())&&res.getRspcod()!=null&&"".equals(res.getRspcod()))
 	            {
 	            	result.put("v_mid", payRequest.getV_mid());
 	    			result.put("v_batch_no", payRequest.getV_batch_no());
@@ -3819,17 +3925,20 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		
 		String str =RequestUtils.doPost(url, param,"UTF-8");
 		log.info("银生宝代付返回参数str:"+JSON.toJSONString(str));
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(str)) {
+			return result;
+		}
 		JSONObject json =JSONObject.fromObject(str);
 		if("0000".equals(json.getString("result_code"))) {
-			result.put("v_mid", payRequest.getV_mid());
-			result.put("v_batch_no", payRequest.getV_batch_no());
-			result.put("v_code", "00");
-			result.put("v_msg", "请求成功");
-			result.put("v_sum_amount", payRequest.getV_sum_amount());
-			result.put("v_amount", payRequest.getV_amount());
-			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-			result.put("v_type", "1");
 		}else {
 			result.put("v_code", "15");
  			result.put("v_msg", "请求失败："+json.getString("result_msg"));
@@ -3904,17 +4013,21 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		String url ="http://api.jinmpay.com/api/pay/create";
 		String str =RequestUtils.sendPost(url, JSON.toJSONString(req),"UTF-8");
 		log.info("金米代付返回参数str:"+JSON.toJSONString(str));
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(str)) {
+			return result;
+		}
 		JSONObject json =JSONObject.fromObject(str);
 		if("00".equals(json.getString("rsp_code"))) {
-			result.put("v_mid", payRequest.getV_mid());
-			result.put("v_batch_no", payRequest.getV_batch_no());
-			result.put("v_code", "00");
-			result.put("v_msg", "请求成功");
-			result.put("v_sum_amount", payRequest.getV_sum_amount());
-			result.put("v_amount", payRequest.getV_amount());
-			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-			result.put("v_type", "1");
+			
 		}else {
 			result.put("v_code", "15");
  			result.put("v_msg", "请求失败："+json.getString("rsp_msg"));
@@ -3956,6 +4069,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	public Map<String, String> wfbPay(DaifuRequestEntity payRequest, Map<String, String> result,
 			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
 		TreeMap<String, String> req = new TreeMap<>();
+		TreeMap<String, String> resp = new TreeMap<>();
 		req.put("payKey", pmsBusinessPos.getBusinessnum());// 商户支付Key
 		req.put("outTradeNo", payRequest.getV_batch_no());
 		//req.put("bankCode", "ICBC");//银行编码
@@ -3978,19 +4092,21 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		//paramSrc=paramSrc+"&"+md5;
 		String url ="http://192.144.172.91:8080/gateway/accountProxyPay/initPay";
 		String str =xdt.dto.scanCode.util.SimpleHttpUtils.httpPost(url, req);
-		//String str =RequestUtils.sendPost(url, JSON.toJSONString(req),"UTF-8");
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(str)) {
+			return result;
+		}
 		log.info("微宝付代付返回参数str:"+JSON.toJSONString(str));
 		JSONObject json =JSONObject.fromObject(str);
 		if("0000".equals(json.getString("resultCode"))) {
-			result.put("v_mid", payRequest.getV_mid());
-			result.put("v_batch_no", payRequest.getV_batch_no());
-			result.put("v_code", "00");
-			result.put("v_msg", "请求成功");
-			result.put("v_sum_amount", payRequest.getV_sum_amount());
-			result.put("v_amount", payRequest.getV_amount());
-			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-			result.put("v_type", "0");
 			ThreadPool.executor(new WFBThread(this, payRequest.getV_mid(), payRequest.getV_batch_no(), payRequest, merchantinfo));
 		}else {
 			result.put("v_code", "15");
@@ -4086,20 +4202,24 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	        //如果服务处理失败，则返回m2的异常信息数据
 	        ret_data = ret.to_json();
 	    }
+		
 	    System.out.println(ret_data);
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(ret_data)) {
+			return result;
+		}
 		com.alibaba.fastjson.JSONObject jsons= com.alibaba.fastjson.JSONObject.parseObject(ret_data);
-	  if("000".equals(jsons.getString("op_ret_code"))) {
-			result.put("v_mid", payRequest.getV_mid());
-			result.put("v_batch_no", payRequest.getV_batch_no());
-			result.put("v_code", "00");
-			result.put("v_msg", "请求成功");
-			result.put("v_sum_amount", payRequest.getV_sum_amount());
-			result.put("v_amount", payRequest.getV_amount());
-			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-			result.put("v_type", payRequest.getV_type());
-			//ThreadPool.executor(new WFBThread(this, payRequest.getV_mid(), payRequest.getV_batch_no(), payRequest, merchantinfo));
-		}else {
+	    if("000".equals(jsons.getString("op_ret_code"))) {
+			
+		}else if("610".equals(jsons.getString("op_ret_code"))||"651".equals(jsons.getString("op_ret_code"))||"600".equals(jsons.getString("op_ret_code"))||"702".equals(jsons.getString("op_ret_code"))||"706".equals(jsons.getString("op_ret_code"))||"708".equals(jsons.getString("op_ret_code"))) {
 			result.put("v_code", "15");
  			result.put("v_msg", "请求失败");
  			UpdateDaifu(payRequest.getV_batch_no(), "02");
@@ -4138,6 +4258,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	public Map<String, String> yszfPay(DaifuRequestEntity payRequest, Map<String, String> result,
 			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
 		Map<String, String> resultMap = null;
+		TreeMap<String, String> respMap = new TreeMap<>();
 		TreeMap<String, String> maps = new TreeMap<>();
 		DecimalFormat df =new DecimalFormat("#");
 		// 全局参数
@@ -4179,59 +4300,187 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			url ="https://cashier.ielpm.com/paygate/v1/dfpay"; 
 		}
 		String str = xdt.dto.scanCode.util.SimpleHttpUtils.httpPost(url, maps);
+		
 		resultMap = ResponseUtil.parseResponse(str, secret);
 		System.out.println("易势返回的参数"+JSON.toJSON(resultMap));
-		// 接口请求完成后，设置返回数据
-	  if("0000".equals(resultMap.get("rtnCode"))) {
-			result.put("v_mid", payRequest.getV_mid());
-			result.put("v_batch_no", payRequest.getV_batch_no());
-			result.put("v_code", "00");
-			result.put("v_msg", "请求成功");
-			result.put("v_sum_amount",payRequest.getV_sum_amount());
-			result.put("v_amount", payRequest.getV_amount());
-			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-			result.put("v_type", "0");
-			UpdateDaifu(payRequest.getV_batch_no(), "00");
-		}else if("0002".equals(resultMap.get("rtnCode"))||"0030".equals(resultMap.get("rtnCode"))||"0003".equals(resultMap.get("rtnCode"))||"00R1".equals(resultMap.get("rtnCode"))||"9999".equals(resultMap.get("rtnCode"))){
-			result.put("v_mid", payRequest.getV_mid());
-			result.put("v_batch_no", payRequest.getV_batch_no());
-			result.put("v_code", "00");
-			result.put("v_msg", "请求成功");
-			result.put("v_sum_amount",payRequest.getV_sum_amount());
-			result.put("v_amount", payRequest.getV_amount());
-			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-			result.put("v_type", "0");
-			ThreadPool.executor(new YSZFThread(this, payRequest.getV_mid(), payRequest.getV_batch_no(), payRequest, merchantinfo));
+		respMap.putAll(resultMap);
+		String respParamSrc = RequestUtils.getParamSrc(respMap);
+		String respSign=resultMap.get("sign").replace(" ", "+");
+		boolean boo = secret.verify(respParamSrc, respSign);
+		if(boo) {
+			log.info("验签成功");
+			// 接口请求完成后，设置返回数据
+					result.put("v_mid", payRequest.getV_mid());
+					result.put("v_batch_no", payRequest.getV_batch_no());
+					result.put("v_code", "00");
+					result.put("v_msg", "请求成功");
+					result.put("v_sum_amount",payRequest.getV_sum_amount());
+					result.put("v_amount", payRequest.getV_amount());
+					result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+					result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+					result.put("v_type", payRequest.getV_type());
+				if("0000".equals(resultMap.get("rtnCode"))) {
+					UpdateDaifu(payRequest.getV_batch_no(), "00");
+				}else if("0002".equals(resultMap.get("rtnCode"))||"0030".equals(resultMap.get("rtnCode"))||"0003".equals(resultMap.get("rtnCode"))||"00R1".equals(resultMap.get("rtnCode"))||"9999".equals(resultMap.get("rtnCode"))){
+					ThreadPool.executor(new YSZFThread(this, payRequest.getV_mid(), payRequest.getV_batch_no(), payRequest, merchantinfo));
+				}else {
+					result.put("v_code", "15");
+		 			result.put("v_msg", "请求失败");
+		 			UpdateDaifu(payRequest.getV_batch_no(), "02");
+		 			Map<String, String> map =new HashMap<>();
+					map.put("machId",payRequest.getV_mid());
+					map.put("payMoney",Double.parseDouble(payRequest.getV_sum_amount())*100+Double.parseDouble(merchantinfo.getPoundage())*100+"");
+					int nus =updataPay(map);
+		 			if(nus==1) {
+		 				log.info("易势代付补款成功");
+		 				DaifuRequestEntity entity =new DaifuRequestEntity();
+		 				entity.setV_mid(payRequest.getV_mid());
+		 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
+		 				entity.setV_amount(payRequest.getV_sum_amount());
+		 				entity.setV_sum_amount(payRequest.getV_sum_amount());
+		 				entity.setV_identity(payRequest.getV_identity());
+		 				entity.setV_cardNo(payRequest.getV_cardNo());
+		 				entity.setV_city(payRequest.getV_city());
+		 				entity.setV_province(payRequest.getV_province());
+		 				entity.setV_type(payRequest.getV_type());
+		 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
+						int ii =add(entity, merchantinfo, result, "00");
+						log.info("易势补款订单状态："+ii);
+		 			}
+				}
 		}else {
-			result.put("v_code", "15");
- 			result.put("v_msg", "请求失败");
- 			UpdateDaifu(payRequest.getV_batch_no(), "02");
- 			Map<String, String> map =new HashMap<>();
-			map.put("machId",payRequest.getV_mid());
-			map.put("payMoney",Double.parseDouble(payRequest.getV_sum_amount())*100+Double.parseDouble(merchantinfo.getPoundage())*100+"");
-			int nus =updataPay(map);
- 			if(nus==1) {
- 				log.info("易势代付补款成功");
- 				DaifuRequestEntity entity =new DaifuRequestEntity();
- 				entity.setV_mid(payRequest.getV_mid());
- 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
- 				entity.setV_amount(payRequest.getV_sum_amount());
- 				entity.setV_sum_amount(payRequest.getV_sum_amount());
- 				entity.setV_identity(payRequest.getV_identity());
- 				entity.setV_cardNo(payRequest.getV_cardNo());
- 				entity.setV_city(payRequest.getV_city());
- 				entity.setV_province(payRequest.getV_province());
- 				entity.setV_type("0");
- 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
-				int ii =add(entity, merchantinfo, result, "00");
-				log.info("易势补款订单状态："+ii);
- 			}
+			log.info("易势返回参数验签失败");
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount",payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+			ThreadPool.executor(new YSZFThread(this, payRequest.getV_mid(), payRequest.getV_batch_no(), payRequest, merchantinfo));
 		}
+		
 	 	return result;
 	}
 	
+	
+	/**
+	 * 国付宝代付
+	 * 
+	 * @param payRequest
+	 * @param result
+	 * @param merchantinfo
+	 * @param pmsBusinessPos
+	 * @throws Exception
+	 */
+	public Map<String, String> gfbPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
+		Map<String, String> resultMap = null;
+		TreeMap<String, String> respMap = new TreeMap<>();
+		TreeMap<String, String> maps = new TreeMap<>();
+		DecimalFormat df =new DecimalFormat("#");
+		// 全局参数
+	 	String cerPath=new File(this.getClass().getResource("/").getPath()).getParentFile()
+				.getParentFile().getCanonicalPath() + "/ky/"+pmsBusinessPos.getBusinessnum()+".cer";
+        String keyStorePath=new File(this.getClass().getResource("/").getPath()).getParentFile()
+				.getParentFile().getCanonicalPath() + "/ky/"+pmsBusinessPos.getBusinessnum()+".pfx";
+        
+        String keyPass=pmsBusinessPos.getKek();
+        
+     // 版本号
+        maps.put("version","1.2");
+        // 交易代码
+        maps.put("tranCode","4025");
+        // 报文字符集 1:GBK,2:UTF-8
+        maps.put("charset","2");
+        // 签名方式 1:MD5,2:SHA 3:RSA
+        maps.put("signType","3");
+        // 商户ID
+        maps.put("customerId", "0000002642");//pmsBusinessPos.getBusinessnum()
+        // 商户账户ID
+        maps.put("payAcctId","0000000002000000293");//pmsBusinessPos.getDepartmentnum()
+        // 查询的商户订单号
+        maps.put("merOrderNum", payRequest.getV_batch_no());
+        maps.put("merURL",xdt.dto.transfer_accounts.util.PayUtil.gfbNotifyUrl);
+        maps.put("tranAmt",payRequest.getV_sum_amount());
+        maps.put("recvBankAcctName",payRequest.getV_realName());
+        maps.put("recvBankName",payRequest.getV_bankname());
+        maps.put("recvBankProvince","");//
+        maps.put("recvBankCity","");///payRequest.getV_city()==null?"":payRequest.getV_city()
+        maps.put("recvBankBranchName","");
+        maps.put("recvBankAcctNum",payRequest.getV_cardNo());
+        maps.put("tranDateTime",payRequest.getV_time());
+        maps.put("description","代付");
+        maps.put("approve","2");
+        maps.put("settlementToday","1");
+        maps.put("VerficationCode","11111aaaaa");
+        maps.put("gopayServerTime",GopayUtils.getGopayServerTime());
+        maps.put("corpPersonFlag","2");
+		String paramSrc = "version=[" + maps.get("version") + "]tranCode=[" +  maps.get("tranCode") + "]customerId=[" +  maps.get("customerId") + "]" +
+                "merOrderNum=[" +  maps.get("merOrderNum") + "]tranAmt=[" +  maps.get("tranAmt") + "]feeAmt=[]totalAmount=[]" +
+                "merURL=[" +  maps.get("merURL") + "]" + "recvBankAcctNum=[" +  maps.get("recvBankAcctNum") + "]tranDateTime=[" +  maps.get("tranDateTime") + "]" +
+                "orderId=[]respCode=[]payAcctId=[" +  maps.get("payAcctId") + "]approve=[" +  maps.get("approve") + "]" +
+                "VerficationCode=[" +  maps.get("VerficationCode") + "]gopayServerTime=[" +  maps.get("gopayServerTime") + "]";
+		log.info("易势支付签名前数据**********支付:" + paramSrc);
+		String sign = xdt.dto.gateway.util.StringUtil.ApiSign(keyStorePath,paramSrc);
+		System.out.println(sign);
+		maps.put("signValue", sign);
+		log.info(JSON.toJSONString(maps));
+		String url ="";
+		if("0000001502".equals(pmsBusinessPos.getBusinessnum())) {
+			url ="https://gatewaymer.gopay.com.cn/Trans/WebClientAction.do"; 
+		}else {
+			url ="https://cashier.ielpm.com/paygate/v1/dfpay"; 
+		}
+		String str = xdt.dto.scanCode.util.SimpleHttpUtils.httpPost(url, maps);
+		System.out.println("国付宝返回的参数"+str);
+		Map<String, String> xmlTomap =XmlToMap.strXmlToMap(str);
+		
+		log.info(JSON.toJSON(xmlTomap));
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount",payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(StringUtil.isNotEmpty(xmlTomap)) {
+			if("1".equals(xmlTomap.get("respCode"))||"3".equals(xmlTomap.get("respCode"))||"4".equals(xmlTomap.get("respCode"))||"5".equals(xmlTomap.get("respCode"))) {
+				result.put("v_code", "15");
+	 			result.put("v_msg", "请求失败");
+	 			UpdateDaifu(payRequest.getV_batch_no(), "02");
+	 			Map<String, String> map =new HashMap<>();
+				map.put("machId",payRequest.getV_mid());
+				map.put("payMoney",Double.parseDouble(payRequest.getV_sum_amount())*100+Double.parseDouble(merchantinfo.getPoundage())*100+"");
+				int nus =updataPay(map);
+	 			if(nus==1) {
+	 				log.info("国付宝代付补款成功");
+	 				DaifuRequestEntity entity =new DaifuRequestEntity();
+	 				entity.setV_mid(payRequest.getV_mid());
+	 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
+	 				entity.setV_amount(payRequest.getV_sum_amount());
+	 				entity.setV_sum_amount(payRequest.getV_sum_amount());
+	 				entity.setV_identity(payRequest.getV_identity());
+	 				entity.setV_cardNo(payRequest.getV_cardNo());
+	 				entity.setV_city(payRequest.getV_city());
+	 				entity.setV_province(payRequest.getV_province());
+	 				entity.setV_type(payRequest.getV_type());
+	 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
+					int ii =add(entity, merchantinfo, result, "00");
+					log.info("国付宝补款订单状态："+ii);
+	 			}
+			}else if("2".equals(xmlTomap.get("respCode"))) {
+				
+			}else if("7".equals(xmlTomap.get("respCode"))) {
+				UpdateDaifu(payRequest.getV_batch_no(), "00");
+			}
+		}
+	 	return result;
+	}
 	/**
 	 * oem假汇聚代付
 	 * 
@@ -4263,19 +4512,22 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		String url="http://mch.fintech2syx.com/cloud/collectpay/api/single.html";
 		String str =RequestUtils.sendPost(url, JSON.toJSONString(req),"UTF-8");
 		log.info("oem汇聚代付返回参数str:"+JSON.toJSONString(str));
+		result.put("v_mid", payRequest.getV_mid());
+		result.put("v_batch_no", payRequest.getV_batch_no());
+		result.put("v_code", "00");
+		result.put("v_msg", "请求成功");
+		result.put("v_sum_amount", payRequest.getV_sum_amount());
+		result.put("v_amount", payRequest.getV_amount());
+		result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+		result.put("v_type", payRequest.getV_type());
+		if(!StringUtil.isNotEmpty(str)) {
+			return result;
+		}
 		JSONObject json =JSONObject.fromObject(str);
 		if("0".equals(json.getString("returnCode"))) {
 			if("0".equals(json.getString("resultCode"))) {
 				if("SUCCESS".equals(json.getString("status"))) {
-					result.put("v_mid", payRequest.getV_mid());
-					result.put("v_batch_no", payRequest.getV_batch_no());
-					result.put("v_code", "00");
-					result.put("v_msg", "请求成功");
-					result.put("v_sum_amount", payRequest.getV_sum_amount());
-					result.put("v_amount", payRequest.getV_amount());
-					result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-					result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-					result.put("v_type", "0");
 					UpdateDaifu(payRequest.getV_batch_no(), "00");
 				}else if("FAIL".equals(json.getString("status"))) {
 					result.put("v_code", "15");
@@ -4303,15 +4555,6 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						log.info("oem汇聚补款订单状态："+ii);
 		 			}
 				}else {
-					result.put("v_mid", payRequest.getV_mid());
-					result.put("v_batch_no", payRequest.getV_batch_no());
-					result.put("v_code", "00");
-					result.put("v_msg", "请求成功");
-					result.put("v_sum_amount", payRequest.getV_sum_amount());
-					result.put("v_amount", payRequest.getV_amount());
-					result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-					result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-					result.put("v_type", "0");
 					ThreadPool.executor(new JHJThread(this, pmsBusinessPos.getBusinessnum(), payRequest.getV_batch_no(), payRequest, merchantinfo));
 				}
 			}else {
@@ -4870,6 +5113,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	public Map<String, String> yszfQuick(String merId, String batchNo) {
 		Map<String, String> resultMap = null;
 		 Map<String, String> map = new HashMap<String, String>();
+		 TreeMap<String, String> resp = new TreeMap<>();
 		 try {
 			 	PmsDaifuMerchantInfo info =new PmsDaifuMerchantInfo();
 		    	info.setBatchNo(batchNo);
@@ -4900,33 +5144,90 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 				System.out.println(md5);
 				req.put("sign", md5);
 				log.info(JSON.toJSONString(req));
-				String url ="https://paydemo.ielpm.com/paygate/v1/dfpay"; 
+				String url ="";
+				if("000020161103001".equals(pmsBusinessPos.getBusinessnum())) {
+					url ="https://paydemo.ielpm.com/paygate/v1/dfpay"; 
+				}else {
+					url ="https://cashier.ielpm.com/paygate/v1/dfpay"; 
+				}
 				String str = xdt.dto.scanCode.util.SimpleHttpUtils.httpPost(url, req);
 				System.out.println(str);
-		      if (!"".equals(str)) {
 		    	resultMap = ResponseUtil.parseResponse(str, secret);
 		        map.put("v_code", "00");
 		        map.put("v_msg", "请求成功");
-		        if ("0000".equals(resultMap.get("rtnCode"))) {
-		        	if("0000".equals(resultMap.get("oriRtnCode"))) {
-		        		map.put("v_status", "0000");
-		        		map.put("v_status_msg", "代付成功");
-		        	}else if("".equals(resultMap.get("oriRtnCode"))||"0030".equals(resultMap.get("oriRtnCode"))||"0002".equals(resultMap.get("oriRtnCode"))||"0003".equals(resultMap.get("oriRtnCode"))||"00R1".equals(resultMap.get("oriRtnCode"))||"9999".equals(resultMap.get("oriRtnCode"))) {
-		        		
-		        	}else {
-		        		map.put("v_status", "1001");
-				          map.put("v_status_msg", "代付失败");
-		        	}
+		        resp.putAll(resultMap);
+		        String respParamSrc = RequestUtils.getParamSrc(resp);
+		        String rsepSign =resultMap.get("sign").replace(" ", "+");
+		        boolean boo =secret.verify(respParamSrc, rsepSign);
+		        if(boo) {
+		        	if ("0000".equals(resultMap.get("rtnCode"))) {
+			        	if("0000".equals(resultMap.get("oriRtnCode"))) {
+			        		map.put("v_status", "0000");
+			        		map.put("v_status_msg", "代付成功");
+			        	}else if("".equals(resultMap.get("oriRtnCode"))||"0030".equals(resultMap.get("oriRtnCode"))||"0002".equals(resultMap.get("oriRtnCode"))||"0003".equals(resultMap.get("oriRtnCode"))||"00R1".equals(resultMap.get("oriRtnCode"))||"9999".equals(resultMap.get("oriRtnCode"))) {
+			        		
+			        	}else {
+			        		map.put("v_status", "1001");
+					        map.put("v_status_msg", "代付失败");
+			        	}
+			        }
 		        }
-		      } else {
-		        map.put("v_code", "01");
-		        map.put("v_msg", "请求失败");
-		      }
-
 		    }
 		    catch (Exception localException)
 		    {
 		    }
+		return map;
+	}
+	
+	public Map<String, String> cjQuick(String merId, String batchNo){
+		 Map<String, String> map = new HashMap<String, String>();
+		 try {
+			    PmsBusinessPos pmsBusinessPos = selectKey(merId);
+			    Map<String, String> req = new HashMap<>();
+		    	req.put(BaseConstant.SERVICE, "cjt_dsf");// 鉴权绑卡确认的接口名
+		    	req.put(BaseConstant.VERSION, "1.0");
+		    	req.put(BaseConstant.PARTNER_ID, pmsBusinessPos.getBusinessnum());
+				// 生产环境测试商户号
+		    	req.put(BaseConstant.TRADE_DATE, BaseConstant.DATE);
+		    	req.put(BaseConstant.TRADE_TIME, BaseConstant.TIME);
+		    	req.put(BaseConstant.INPUT_CHARSET, BaseConstant.CHARSET);// 字符集
+		    	req.put(BaseConstant.MEMO, "");// 备注
+		    	req.put("TransCode","C00000");//
+		    	req.put("OriOutTradeNo",batchNo);
+		    	req.put("OutTradeNo", merId+batchNo+new SimpleDateFormat("HHmmss").format(new Date()));
+		        
+		    	String data = ChanPayUtil.sendPost(req, BaseConstant.CHARSET, pmsBusinessPos.getKek());
+		    	log.info("畅捷返回参数：" + data);
+		    	
+		    	if(StringUtil.isNotEmpty(data)) {
+		    		Map<String, String> maps = JsonUtil.jsonToMap(data);
+		    		 	map.put("v_code", "00");
+				        map.put("v_msg", "请求成功");
+				        if ("S".equals(maps.get("AcceptStatus"))) {
+				        	if("0000".equals(maps.get("PlatformRetCode"))) {
+				        		if("000000".equals(maps.get("OriginalRetCode"))) {
+					        		map.put("v_status", "0000");
+					        		map.put("v_status_msg", "代付成功");
+					        	}else if("111111".equals(maps.get("OriginalRetCode"))) {
+					        		map.put("v_status", "1001");
+							        map.put("v_status_msg", "代付失败");
+					        	}
+				        	}else if("1000".equals(maps.get("PlatformRetCode"))||"2004".equals(maps.get("PlatformRetCode"))||"2009".equals(maps.get("PlatformRetCode"))) {
+				        		map.put("v_status", "1001");
+						        map.put("v_status_msg", "代付失败");
+				        	}
+				        }else if("F".equals(maps.get("AcceptStatus"))) {
+				        	map.put("v_status", "1001");
+					        map.put("v_status_msg", "代付失败");
+				        }
+		      } else {
+		        map.put("v_code", "01");
+		        map.put("v_msg", "请求失败");
+		      }
+		 }
+	    catch (Exception localException)
+	    {
+	    }
 		return map;
 	}
 	

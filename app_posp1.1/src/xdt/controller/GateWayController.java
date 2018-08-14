@@ -1418,7 +1418,7 @@ public class GateWayController extends BaseAction {
 				result.put("v_mid", originalInfo.getPid());
 				result.put("v_msg", "请求成功");
 				if ("01".equals(synchNotifyParams.get("transStatus"))) {
-					if("000001110100000663".equals(request.getParameter("merchantId"))) {
+					/*if("000001110100000663".equals(request.getParameter("merchantId"))) {
 						int ii =0;
 						if("10021016940".equals(originalInfo.getPid())) {
 							ii =gateWayService.UpdatePmsMerchantInfo(originalInfo,0.5);
@@ -1427,7 +1427,7 @@ public class GateWayController extends BaseAction {
 						}
 						
 						 log.info("裕福实时入金状态:"+ii);
-					}
+					}*/
 					result.put("v_status", "0000");
 					result.put("v_status_msg", "支付成功");
 				} else if ("02".equals(synchNotifyParams.get("transStatus"))) {

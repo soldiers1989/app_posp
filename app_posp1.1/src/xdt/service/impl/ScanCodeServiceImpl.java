@@ -1624,7 +1624,7 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
         Secret secret = new Secret(e);
         // 敏感信息加密
         map.put("buyerName", secret.encrypt("张三"));
-        map.put("buyerId", "123456");
+        map.put("buyerId", entity.getV_mid());
         map.put("remark", entity.getV_attach()==null?"付款":entity.getV_attach());
         String paramSrc = RequestUtils.getParamSrc(map);
 		log.info("易势支付签名前数据**********支付:" + paramSrc);
