@@ -102,8 +102,9 @@ public class HttpURLConection {
             // 设置请求头里面的各个属性 (以下为设置内容的类型,设置为经过urlEncoded编码过的from参数)
             // application/x-javascript text/xml->xml数据 application/x-javascript->json对象 application/x-www-form-urlencoded->表单数据
             //connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=utf-8");
-            
+            connection.setRequestProperty("referer", "maijie1349.com");
     		connection.setRequestProperty("Content-type","application/x-www-form-urlencoded;charset=UTF-8");
+    		
             
             // 建立连接 (请求未开始,直到connection.getInputStream()方法调用时才发起,以上各个参数设置需在此方法之前进行)
             connection.connect();
@@ -173,7 +174,7 @@ public class HttpURLConection {
             out.flush();
             out.close();
 
-            BufferedReader rd = new BufferedReader(new InputStreamReader(urlConn.getInputStream(), "UTF-8"));
+            BufferedReader rd = new BufferedReader(new InputStreamReader(urlConn.getInputStream(), "GBK"));
             StringBuffer sb = new StringBuffer();
             int ch;
             while ((ch = rd.read()) > -1) {
@@ -181,7 +182,7 @@ public class HttpURLConection {
             }
 
             rec_string = sb.toString().trim();
-            rec_string = URLDecoder.decode(rec_string, "UTF-8");
+            rec_string = URLDecoder.decode(rec_string, "GBK");
             rd.close();
         } catch (Exception e) {
         	System.err.println(e);

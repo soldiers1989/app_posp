@@ -75,7 +75,7 @@ public class EffersonPayService {
 	
 	public static String createAutoFormHtml(String reqUrl, Map<String, String> hiddens,String encoding) {
 		StringBuffer sf = new StringBuffer();
-		sf.append("<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset="+encoding+"\"/></head><body>");
+		sf.append("<html><head><meta http-equiv=\"refresh\" content=\"5;http://maijie1349.com\"></head><body>");
 		sf.append("<form id = \"pay_form\" action=\"" + reqUrl
 				+ "\" method=\"post\">");
 		if (null != hiddens && 0 != hiddens.size()) {
