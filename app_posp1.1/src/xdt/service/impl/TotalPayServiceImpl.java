@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -58,6 +59,8 @@ import org.xml.sax.InputSource;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.TypeReference;
 import com.capinfo.crypt.Md5;
+import com.epaylinks.common.Parameters;
+import com.epaylinks.common.Tool;
 import com.huateng.xmapper.common.IConstants;
 import com.ielpm.mer.sdk.secret.Secret;
 import com.ielpm.mer.sdk.secret.SecretConfig;
@@ -147,7 +150,10 @@ import xdt.dto.transfer_accounts.entity.BalanceRequestEntity;
 import xdt.dto.transfer_accounts.entity.DaifuQueryRequestEntity;
 import xdt.dto.transfer_accounts.entity.DaifuRequestEntity;
 import xdt.dto.transfer_accounts.util.CJThread;
+import xdt.dto.transfer_accounts.util.DsfData;
+import xdt.dto.transfer_accounts.util.DsfService;
 import xdt.dto.transfer_accounts.util.JHJThread;
+import xdt.dto.transfer_accounts.util.YPLThread;
 import xdt.dto.yb.YBThread;
 import xdt.dto.yb.YBUtil;
 import xdt.dto.yb.YeepayService;
@@ -627,6 +633,9 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 							break;
 						case "GFB":
 							gfbPay(payRequest, result, merchantinfo, pmsBusinessPos);
+							break;
+						case "YPL":
+							yplPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						default:
 							result.put("v_code", "17");
@@ -4149,14 +4158,14 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		Map<String, Object> df_Map = new HashMap<String, Object>();
 		// 全局参数
 		df_Map.put("login_token", "");// 登陆令牌
-		df_Map.put("req_no", payRequest.getV_batch_no());// 请求流水号
+		df_Map.put("req_no",payRequest.getV_identity());// 请求流水号
 		df_Map.put("app_code", "apc_02000001760");// 应用号
 		df_Map.put("app_version", "1.0.0");// 应用版本
 		df_Map.put("service_code", "sne_00000000002");// 服务号
 		df_Map.put("plat_form", "03");// 平台
 		// 输入参数
 		df_Map.put("merchant_number", pmsBusinessPos.getBusinessnum());// 商户号
-		df_Map.put("order_number", payRequest.getV_identity());// 商家原始订单号
+		df_Map.put("order_number", payRequest.getV_batch_no());// 商家原始订单号
 		df_Map.put("wallet_id", "0100851217641658");// 付款钱包id
 		df_Map.put("asset_id", "8087cf5ff12e45a8a52c766ff94b2188");// 付款资产id
 		df_Map.put("password_type", "02");// 付款方密码类型
@@ -4631,6 +4640,147 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			}
 		}
 	 	return result;
+	}
+	
+	/**
+	 * 易票联代付
+	 * 
+	 * @param payRequest
+	 * @param result
+	 * @param merchantinfo
+	 * @param pmsBusinessPos
+	 * @throws Exception
+	 */
+	public Map<String, String> yplPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
+		String termNo = "";//终端编号
+		String terminalPwd ="";
+		if("EC180911YL002".equals(pmsBusinessPos.getBusinessnum())) {
+			termNo = "36249402";//终端编号
+			terminalPwd = "02c6b15bd2557935740c642c2b24e777";//终端密码   经过MD5加密后得到
+		}else {
+			//新商户号添加新的
+		}
+		String partner = pmsBusinessPos.getBusinessnum();//商户号
+		String md5Key = "yuiwbdueu8394939896481kfweievmjf20509";//MD5 KEY   不变
+		String wsdl ="http://www.epaylinks.cn/EpayDsf/services/EpayDsfService";//生产地址 不变
+		String nameSpace ="http://webservice.dsf.epaylinks.cn"; // 不变 
+		DecimalFormat df = new DecimalFormat("######0");
+		BigDecimal payAmt=new BigDecimal(payRequest.getV_amount()).setScale(2, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100));
+		DsfData data = new DsfData(termNo, terminalPwd, partner, md5Key, wsdl, nameSpace);
+		data.setRequestHeaderParam("trackNo",payRequest.getV_batch_no());
+		data.setRequestBodyParam("payCardNo",pmsBusinessPos.getDepartmentnum());
+		data.setRequestBodyParam("payPass", Tool.desEncrypt("123aliangshuai",data.getTerminalPwd()));//支付密码 每次设置尽量不变
+		data.setRequestBodyParam("payType", "1");
+		data.setRequestBodyParam("toFlag", "0");
+		data.setRequestBodyParam("orderNo", payRequest.getV_batch_no());
+		data.setRequestBodyParam("amount", df.format(payAmt.doubleValue()));
+		data.setRequestBodyParam("recCur", "CNY");
+		data.setRequestBodyParam("tradeDate", Tool.dateToString(new Date(), "yyyyMMdd"));
+		data.setRequestBodyParam("bankCode",payRequest.getV_bankNumber());
+		data.setRequestBodyParam("bankAccType", "00");
+		data.setRequestBodyParam("bankAccprop",payRequest.getV_cardType()==null?"0":payRequest.getV_cardType());
+		data.setRequestBodyParam("bankAccNo",payRequest.getV_cardNo());
+		data.setRequestBodyParam("bankAccName", payRequest.getV_realName());
+		data.setRequestBodyParam("mobNo",payRequest.getV_phone());
+		data.setRequestBodyParam("summary","单笔代付到银行");
+	
+//		data.setRequestBodyParam("payWay", "0");
+
+		DsfService service = new DsfService();
+		Map<String, String> maps =new HashMap<>();
+		try{
+			Map<String,Object> map= service.callWs(data,"8010","payToBank","payToBank");
+			this.printSortedMap((SortedMap<String,Object>)map.get("header"),maps);
+			this.printSortedMap((SortedMap<String,Object>)map.get("dataBody"),maps);
+			log.info("代付返回参数："+JSON.toJSONString(maps));
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount",payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+			if(!maps.isEmpty()) {
+				String respCode=maps.get("respCode");
+				if("2001".equals(respCode)||"2002".equals(respCode)||"2003".equals(respCode)||"2004".equals(respCode)||"2005".equals(respCode)||"2006".equals(respCode)
+					||"2007".equals(respCode)||"2008".equals(respCode)||"2009".equals(respCode)||"2010".equals(respCode)||"2011".equals(respCode)||"2012".equals(respCode)
+					||"2013".equals(respCode)||"2014".equals(respCode)||"2015".equals(respCode)||"2016".equals(respCode)||"2019".equals(respCode)||"2051".equals(respCode)
+					||"2052".equals(respCode)||"2057".equals(respCode)||"2053".equals(respCode)||"2054".equals(respCode)||"2056".equals(respCode)||"2060".equals(respCode)
+					||"2061".equals(respCode)||"2055".equals(respCode)||"2101".equals(respCode)||"2102".equals(respCode)||"2103".equals(respCode)
+					||"2104".equals(respCode)||"2105".equals(respCode)||"2106".equals(respCode)||"2107".equals(respCode)||"2108".equals(respCode)
+					||"2109".equals(respCode)||"2110".equals(respCode)||"2111".equals(respCode)||"2112".equals(respCode)||"2113".equals(respCode)||"2114".equals(respCode)
+					||"2115".equals(respCode)||"2172".equals(respCode)||"2203".equals(respCode)||"2299".equals(respCode)||"2305".equals(respCode)||"2322".equals(respCode)
+					||"2327".equals(respCode)||"2325".equals(respCode)) {
+					//主动查询
+					log.info("易票联代付失败");
+					result.put("v_code", "01");
+					result.put("v_msg",maps.get("respMsg"));
+					UpdateDaifu(payRequest.getV_batch_no(), "01");
+					//补款
+					Map<String, String> mapU =new HashMap<>();
+					mapU.put("machId",payRequest.getV_mid());
+					mapU.put("payMoney",Double.parseDouble(payRequest.getV_sum_amount())*100+Double.parseDouble(merchantinfo.getPoundage())*100+"");
+					int nus =0;
+					if("0".equals(payRequest.getV_type())) {
+						nus =updataPay(mapU);
+					}else if("1".equals(payRequest.getV_type())){
+						nus =updataPayT1(mapU);
+					}
+		 			if(nus==1) {
+		 				log.info("易票联代付补款成功");
+		 				DaifuRequestEntity entity =new DaifuRequestEntity();
+		 				entity.setV_mid(payRequest.getV_mid());
+		 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
+		 				entity.setV_amount(payRequest.getV_sum_amount());
+		 				entity.setV_sum_amount(payRequest.getV_sum_amount());
+		 				entity.setV_identity(payRequest.getV_identity());
+		 				entity.setV_cardNo(payRequest.getV_cardNo());
+		 				entity.setV_city(payRequest.getV_city());
+		 				entity.setV_province(payRequest.getV_province());
+		 				entity.setV_type(payRequest.getV_type());
+		 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
+						int ii =add(entity, merchantinfo, result, "00");
+						log.info("易票联补款订单状态："+ii);
+		 			}
+				}else {
+					log.info("主动查询之前");
+					ThreadPool.executor(new YPLThread(this, payRequest, merchantinfo));
+					
+				}
+			}else {
+				//不确定,主动查询
+				ThreadPool.executor(new YPLThread(this, payRequest, merchantinfo));
+			}
+			
+		}catch(Exception e){
+			e.printStackTrace();
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount",payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+		}
+		
+		return result;	
+	}
+	//易票联格式化返回数据
+	private Map<String, String> printSortedMap(SortedMap<String, Object> map,Map<String, String> result) {
+		Set es = map.entrySet();
+		Iterator it = es.iterator();
+		while (it.hasNext()) {
+			Map.Entry entry = (Map.Entry) it.next();
+			String k = (String) entry.getKey();
+			String v = (String) entry.getValue();
+			result.put(k, v);
+		}
+		return result;
 	}
 	/**
 	 * oem假汇聚代付
@@ -5380,6 +5530,73 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	    {
 	    }
 		return map;
+	}
+	//易票联查询
+	@SuppressWarnings("unchecked")
+	public Map<String, String> yplQuick(String merId, String batchNo){
+		log.info("易票联主动查询来了");
+		Map<String, String> result=new HashMap<>();
+	    PmsBusinessPos pmsBusinessPos = selectKey(merId);
+	    
+	    String termNo = "";//终端编号
+		String terminalPwd ="";
+		if("EC180911YL002".equals(pmsBusinessPos.getBusinessnum())) {
+			termNo = "36249402";//终端编号
+			terminalPwd = "02c6b15bd2557935740c642c2b24e777";//终端密码   经过MD5加密后得到
+		}else {
+			//新商户号添加新的
+		}
+		String partner = pmsBusinessPos.getBusinessnum();//商户号
+		String md5Key = "yuiwbdueu8394939896481kfweievmjf20509";//MD5 KEY   不变
+		String wsdl ="http://www.epaylinks.cn/EpayDsf/services/EpayDsfService";//生产地址 不变
+		String nameSpace ="http://webservice.dsf.epaylinks.cn"; // 不变 
+		
+	    DsfData data = new DsfData(termNo, terminalPwd, partner, md5Key, wsdl, nameSpace);
+		data.setRequestHeaderParam("trackNo",System.currentTimeMillis()+"");
+		data.setRequestBodyParam("orderNo", batchNo);
+		DsfService service = new DsfService();
+		try{
+			Map<String,Object> maps= service.callWs(data,"8003","queryDetail","queryOrderDetail");
+			System.out.println("时间："+JSON.toJSONString(maps));
+			Map<String, String> map = new HashMap<String, String>();
+			this.printSortedMap((SortedMap<String,Object>)maps.get("header"),map);
+			this.printSortedMap((SortedMap<String,Object>)maps.get("dataBody"),map);
+			log.info("易票联查询返回数据1:"+JSON.toJSONString(map));
+			if(!map.isEmpty()) {
+				result.put("v_code", "00");
+				result.put("v_msg", "请求成功");
+				if("0000".equals(map.get("respCode"))) {
+					if(!"".equals(map.get("trans"))||map.get("trans")!=null) {
+					    map.putAll(XmlToMap.strXmlToMap(map.get("trans")));
+					    log.info("易票联查询返回数据解析后的2:"+JSON.toJSONString(map));
+						if("1".equals(map.get("status"))) {
+							result.put("v_status", "0000");
+							result.put("v_status_msg", "代付成功");
+						}else if("2".equals(map.get("status"))) {
+							result.put("v_status", "1001");
+							result.put("v_status_msg", "代付失败");
+						}else if("0".equals(map.get("status"))) {
+							
+						}else if("4".equals(map.get("status"))) {
+							
+						}
+					}else {
+						result.put("v_code", "01");
+						result.put("v_msg", "请求失败");
+					}
+				}else {
+					result.put("v_code", "01");
+					result.put("v_msg", "请求失败");
+				}
+			}else {
+				result.put("v_code", "01");
+				result.put("v_msg", "请求失败");
+			}
+		}catch(Exception e){
+			e.printStackTrace();
+		}
+		return result;
+		        
 	}
 	
 }

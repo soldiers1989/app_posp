@@ -1556,7 +1556,7 @@ public class TotalPayController extends BaseAction {
 		Map<String, String> maps =new HashMap<>();
 		request.getSession();
 		//String sign="";
-		
+		log.info("异步返回参数："+dstbdata);
 		Map<String, String> respMap =new HashMap<>();
 		
 		if(dstbdata!=""&&dstbdata!=null&&dstbdatasign!=null&&dstbdatasign!="") {
@@ -1609,7 +1609,7 @@ public class TotalPayController extends BaseAction {
 							e.printStackTrace();
 						}
 					}else {
-						if(!"00".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())&&!"".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())) {
+						if(!"02".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())||!"01".equals(pmsDaifuMerchantInfos.get(0).getResponsecode())) {
 						maps.put("v_status", "1001");
 						maps.put("v_msg", respMap.get("errtext"));
 						try {

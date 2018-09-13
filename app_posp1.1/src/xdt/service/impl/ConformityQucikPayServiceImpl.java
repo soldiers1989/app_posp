@@ -2,9 +2,13 @@ package xdt.service.impl;
 
 import com.alibaba.fastjson.JSON;
 import com.kspay.MD5Util;
-import java.io.PrintStream;
+
+
+import java.io.File;
+import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.text.DecimalFormat;
 import java.util.Date;
 import java.util.HashMap;
@@ -14,7 +18,6 @@ import java.util.Map;
 import java.util.TreeMap;
 
 import javax.annotation.Resource;
-import net.sf.json.JSONObject;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.springframework.stereotype.Service;
@@ -27,7 +30,6 @@ import xdt.dao.IPmsMerchantInfoDao;
 import xdt.dao.IPospTransInfoDAO;
 import xdt.dao.OriginalOrderInfoDao;
 import xdt.dto.BaseUtil;
-import xdt.dto.quickPay.entity.QueryRequestEntity;
 import xdt.model.AppRateConfig;
 import xdt.model.ChannleMerchantConfigKey;
 import xdt.model.OriginalOrderInfo;
@@ -42,7 +44,9 @@ import xdt.quickpay.conformityQucikPay.entity.ConformityQucikPayRequestEntity;
 import xdt.quickpay.conformityQucikPay.entity.ConformityQuickPayQueryRequestEntity;
 import xdt.quickpay.conformityQucikPay.util.OrderStatusEnum;
 import xdt.quickpay.conformityQucikPay.util.RSAUtils;
+import xdt.quickpay.conformityQucikPay.util.SecurityUtil;
 import xdt.quickpay.conformityQucikPay.util.StringUtil;
+import xdt.quickpay.conformityQucikPay.util.Tool;
 import xdt.quickpay.conformityQucikPay.util.UtilDate;
 import xdt.quickpay.yb.util.YeepayService;
 import xdt.service.IConformityQucikPayService;
@@ -139,14 +143,14 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 				PmsBusinessPos pmsBusinessPos = selectKey(originalinfo.getV_mid());
 
 				ResultInfo payCheckResult = this.iPublicTradeVerifyService
-						.amountVerifyOagent((int) Double.parseDouble(factAmount), TradeTypeEnum.onlinePay, oAgentNo);
+						.amountVerifyOagent((int) Double.parseDouble(factAmount), TradeTypeEnum.merchantCollect, oAgentNo);
 				if (!payCheckResult.getErrCode().equals("0")) {
 					this.logger.info("欧单金额限制，oAagentNo:" + oAgentNo + ",payType:"
 							+ PaymentCodeEnum.hengFengQuickPay.getTypeCode());
 					return setResp("05", "欧单金额限制，请重试或联系客服");
 				}
 				ResultInfo resultInfoForOAgentNo = this.iPublicTradeVerifyService
-						.moduleVerifyOagent(TradeTypeEnum.onlinePay, oAgentNo);
+						.moduleVerifyOagent(TradeTypeEnum.merchantCollect, oAgentNo);
 				if (!resultInfoForOAgentNo.getErrCode().equals("0")) {
 					if (StringUtils.isEmpty(resultInfoForOAgentNo.getMsg())) {
 						this.logger.error("交易关闭，请重试或联系客服");
@@ -154,7 +158,7 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 					}
 					return setResp("07", "系统异常，请重试或联系客服");
 				}
-				ResultInfo payCheckResult3 = this.iPublicTradeVerifyService.moduelVerifyMer(TradeTypeEnum.onlinePay,
+				ResultInfo payCheckResult3 = this.iPublicTradeVerifyService.moduelVerifyMer(TradeTypeEnum.merchantCollect,
 						mercId);
 				if (!payCheckResult3.getErrCode().equals("0")) {
 					this.logger.info("商户模块限制，oAagentNo:" + oAgentNo + ",payType:"
@@ -163,7 +167,7 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 				}
 				Map<String, String> paramMap = new HashMap();
 				paramMap.put("mercid", merchantinfo.getMercId());
-				paramMap.put("businesscode", TradeTypeEnum.onlinePay.getTypeCode());
+				paramMap.put("businesscode", TradeTypeEnum.merchantCollect.getTypeCode());
 				paramMap.put("oAgentNo", oAgentNo);
 
 				Map<String, String> resultMap = this.merchantMineDao.queryBusinessInfo(paramMap);
@@ -186,11 +190,11 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 
 				pmsAppTransInfo.setoAgentNo(oAgentNo);
 				pmsAppTransInfo.setStatus(OrderStatusEnum.initlize.getStatus());
-				pmsAppTransInfo.setTradetype(TradeTypeEnum.onlinePay.getTypeName());
+				pmsAppTransInfo.setTradetype(TradeTypeEnum.merchantCollect.getTypeName());
 
 				pmsAppTransInfo.setTradetime(UtilDate.getDateFormatter());
 				pmsAppTransInfo.setMercid(merchantinfo.getMercId());
-				pmsAppTransInfo.setTradetypecode(TradeTypeEnum.onlinePay.getTypeCode());
+				pmsAppTransInfo.setTradetypecode(TradeTypeEnum.merchantCollect.getTypeCode());
 
 				pmsAppTransInfo.setOrderid(originalinfo.getV_oid());
 				pmsAppTransInfo.setPaymenttype(PaymentCodeEnum.hengFengQuickPay.getTypeName());
@@ -278,24 +282,21 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 					Integer paymentAmountInt = Integer.valueOf((int) Double.parseDouble(paymentAmount));
 
 					payCheckResult = this.iPublicTradeVerifyService.totalVerify(paymentAmountInt.intValue(),
-							TradeTypeEnum.onlinePay, PaymentCodeEnum.hengFengQuickPay, oAgentNo,
+							TradeTypeEnum.merchantCollect, PaymentCodeEnum.hengFengQuickPay, oAgentNo,
 							merchantinfo.getMercId());
 					if (!payCheckResult.getErrCode().equals("0")) {
 						this.logger.info("不支持的支付方式，oAagentNo:" + oAgentNo + ",payType:"
 								+ PaymentCodeEnum.hengFengQuickPay.getTypeCode());
 						return setResp("13", "暂不支持该交易方式");
 					}
-					ViewKyChannelInfo channelInfo = (ViewKyChannelInfo) AppPospContext.context
-							.get(HENGFENGPAY + HENGFENGCHANNELNUM);
-
-					pmsAppTransInfo.setBusinessNum(channelInfo.getBusinessnum());
-					pmsAppTransInfo.setChannelNum(HENGFENGCHANNELNUM);
+					pmsAppTransInfo.setBusinessNum(pmsBusinessPos.getBusinessnum());
+					pmsAppTransInfo.setChannelNum(pmsBusinessPos.getChannelnum());
 
 					PospTransInfo pospTransInfo = null;
 
 					int insertOrUpdateFlag = 0;
 
-					String transOrderId = generateTransOrderId(TradeTypeEnum.onlinePay,
+					String transOrderId = generateTransOrderId(TradeTypeEnum.merchantCollect,
 							PaymentCodeEnum.hengFengQuickPay);
 					if ((pospTransInfo = this.pospTransInfoDAO.searchByOrderId(pmsAppTransInfo.getOrderid())) != null) {
 						this.logger.info("订单号：" + pmsAppTransInfo.getOrderid() + ",生成上送通道的流水号：" + transOrderId);
@@ -630,6 +631,9 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 							retMap.put("v_code", "00");
 							retMap.put("v_msg", "请求成功");
 							break;
+						case "YPL":
+							retMap =yplQuickPay(originalinfo, pmsBusinessPos, retMap);
+							break;
 						default:							
 							break;
 						}
@@ -908,5 +912,82 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 			e.printStackTrace();
 		}
 		return result;
+	}
+	
+	
+	public Map<String, String> yplQuickPay(ConformityQucikPayRequestEntity originalinfo,PmsBusinessPos pmsBusinessPos,Map<String, String> retMap){
+	    String certId;
+		logger.info("################易票联(WAP)支付开始处理#################");
+		TreeMap<String, String> paramsMap = new TreeMap<String, String>();
+		paramsMap.put("partner", pmsBusinessPos.getBusinessnum());
+		paramsMap.put("out_trade_no",originalinfo.getV_oid() );
+		paramsMap.put("total_fee",originalinfo.getV_txnAmt());
+		paramsMap.put("currency_type", "RMB");
+		paramsMap.put("return_url", "http://ypl.lssc888.com:8107/app_posp/conformity/yplReturnUrl.action");
+		paramsMap.put("notify_url", "http://ypl.lssc888.com:8107/app_posp/conformity/yplNotifyUrl.action");
+		paramsMap.put("order_create_ip", "");
+
+		paramsMap.put("pay_id", "unionquickpay");
+		paramsMap.put("base64_memo", "");//originalinfo.getV_productDesc()
+		paramsMap.put("time_out", "");
+		
+		try{
+			String keyStoreFilePath = new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath()+"/ky/"+pmsBusinessPos.getBusinessnum()+".pfx";
+		    String epaylinksCertPath = new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath()+"/ky/"+pmsBusinessPos.getBusinessnum()+".cer";
+
+			String keyStorePassword = pmsBusinessPos.getKek();
+			String keyPassword = pmsBusinessPos.getKek();
+			
+			certId =SecurityUtil.getinit(keyStoreFilePath, keyStorePassword, keyPassword, epaylinksCertPath);			
+		}catch(Exception e){
+			throw new RuntimeException(e);
+		}
+		paramsMap.put("version", "4.0");
+		paramsMap.put("sign_type", "SHA256withRSA");
+		paramsMap.put("certId", certId);
+		
+		
+
+		String keys = pmsBusinessPos.getKek();
+
+		//拼接签名原串
+		String paramSrc = StringUtil.getParamSrc(paramsMap);
+		
+		logger.info("待签名数据："+paramSrc);
+		//生成签名
+		String sign = "";
+		try {
+			sign = SecurityUtil.signForBase64(paramSrc.getBytes("UTF-8"));
+		} catch (UnsupportedEncodingException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		paramsMap.put("sign", sign);
+		
+		//rsa密串
+		String cipherData="";
+		String encryptSrc="";
+		try {
+			encryptSrc =Tool.getRequestStr(paramsMap);
+			//encryptSrc = paramSrc + "&sign=" + sign;//加密原串
+			logger.info("转码之前的数据："+encryptSrc);
+			cipherData = URLEncoder.encode(encryptSrc,"UTF-8");
+			logger.info("转码之后的数据："+cipherData);
+		} catch (UnsupportedEncodingException e) {
+			e.printStackTrace();
+		}
+		
+		retMap.put("cipherData", encryptSrc);
+		retMap.put("v_code", "00");
+		retMap.put("v_msg", "请求成功");
+		if("130".equals(pmsBusinessPos.getBusinessnum())) {
+			retMap.put("pay_url", "http://wx.globalcash.cn/paycenter/v2.0/getoi.do");
+		}else {
+			retMap.put("pay_url", "https://www.epaylinks.cn/paycenter/v2.0/getoi.do");
+		}
+		return retMap;
 	}
 }

@@ -88,7 +88,7 @@ public class HttpURLConection {
             connection.setDoInput(true);
             
             // 设置请求方式为post
-            connection.setRequestMethod("POST");
+            connection.setRequestMethod("GET");
             
             // post请求缓存设为false
             connection.setUseCaches(false);
@@ -102,7 +102,7 @@ public class HttpURLConection {
             // 设置请求头里面的各个属性 (以下为设置内容的类型,设置为经过urlEncoded编码过的from参数)
             // application/x-javascript text/xml->xml数据 application/x-javascript->json对象 application/x-www-form-urlencoded->表单数据
             //connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=utf-8");
-            connection.setRequestProperty("referer", "maijie1349.com");
+            connection.setRequestProperty("referer", "http://www.maijie1349.com");
     		connection.setRequestProperty("Content-type","application/x-www-form-urlencoded;charset=UTF-8");
     		
             

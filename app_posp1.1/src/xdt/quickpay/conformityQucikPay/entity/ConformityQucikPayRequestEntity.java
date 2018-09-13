@@ -2,19 +2,19 @@ package xdt.quickpay.conformityQucikPay.entity;
 
 public class ConformityQucikPayRequestEntity {
 	
-	  private String v_version;
-	  private String v_mid;
-	  private String v_userId;
-	  private String v_oid;
-	  private String v_time;
-	  private String v_card;
-	  private String v_txnAmt;
-	  private String v_cardType;
-	  private String v_type;
-	  private String v_productDesc;
-	  private String v_notify_url;
-	  private String v_url;
-	  private String v_attach;
+	  private String v_version;//版本号
+	  private String v_mid;//商户号
+	  private String v_userId;//用户表示
+	  private String v_oid;//订单号
+	  private String v_time;//请求时间
+	  private String v_card;//卡号
+	  private String v_txnAmt;//金额
+	  private String v_cardType;//
+	  private String v_type;//D0 T1
+	  private String v_productDesc;//说明
+	  private String v_notify_url;//异步地址
+	  private String v_url;//同步地址
+	  private String v_attach;//上传参数
 	  private String v_sign;
 	public String getV_version() {
 		return v_version;

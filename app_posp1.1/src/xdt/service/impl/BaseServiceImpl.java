@@ -1824,11 +1824,17 @@ public class BaseServiceImpl {
 		PmsBusinessPos businessPos = new PmsBusinessPos();
 		try {
 			PospRouteInfo route = route(merid);
+			if(route==null){
+				return businessPos;
+			}
 			System.out.println(route);
 			PmsBusinessInfo busInfo = new PmsBusinessInfo();
 			System.out.println(route.getMerchantId().toString());
 			busInfo = pmsBusinessInfoDao.searchById(route.getMerchantId()
 					.toString());
+			if(busInfo==null) {
+				return businessPos;
+			}
 			businessPos.setBusinessnum(busInfo.getBusinessNum());
 			businessPos = businessPosDao.searchById(businessPos
 					.getBusinessnum());
@@ -1842,6 +1848,7 @@ public class BaseServiceImpl {
 			System.out.println(JSON.toJSON(businessPos));
 		} catch (Exception e) {
 			e.printStackTrace();
+			
 		}
 		return businessPos;
 	}

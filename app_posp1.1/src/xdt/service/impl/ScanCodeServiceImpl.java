@@ -1486,7 +1486,11 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		com.alibaba.fastjson.JSONObject json =com.alibaba.fastjson.JSONObject.parseObject(str);
 		if("0000".equals(json.getString("resultCode"))) {
 			result.put("v_result", json.getString("payMessage"));
-			result.put("v_code", "00");
+			if("ALIPAY_H5".equals(entity.getV_cardType())) {
+				result.put("v_code", "0000");
+			}else {
+				result.put("v_code", "00");
+			}
 			result.put("v_msg", "请求成功");
 		}else {
 			result.put("v_code", "01");

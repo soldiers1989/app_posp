@@ -183,6 +183,11 @@ public class ConformityQucikPayController extends BaseAction {
 					response.sendRedirect(RSAUtils.cardPayApplyApi + "?cipher_data="
 							+ URLEncoder.encode(result.get("cipherData"), RSAUtils.serverEncodeType));
 					break;
+				case "YPL"://易票联
+					url =result.get("pay_url")+ "?"+result.get("cipherData");
+					logger.info("易票联快捷上送的数据:" + url);
+					response.sendRedirect(url);
+					break;
 				default:						
 					break;
 				}
@@ -444,7 +449,7 @@ public class ConformityQucikPayController extends BaseAction {
 							map.put("success", value);
 						}
 					}
-					if (map.get("success").equals("false")) {
+					if (!map.get("success").equals("true")) {
 
 						logger.info("易宝支付启动线程进行异步通知");
 						// 启线程进行异步通知
@@ -607,7 +612,7 @@ public class ConformityQucikPayController extends BaseAction {
 							map.put("success", value);
 						}
 					}
-					if (map.get("success").equals("false")) {
+					if (!map.get("success").equals("true")) {
 
 						logger.info("摩宝支付启动线程进行异步通知");
 						// 启线程进行异步通知
@@ -771,7 +776,7 @@ public class ConformityQucikPayController extends BaseAction {
 							map.put("success", value);
 						}
 					}
-					if (map.get("success").equals("false")) {
+					if (!map.get("success").equals("true")) {
 
 						logger.info("银生宝支付启动线程进行异步通知");
 						// 启线程进行异步通知
@@ -979,7 +984,7 @@ public class ConformityQucikPayController extends BaseAction {
 							map.put("success", value);
 						}
 					}
-					if (map.get("success").equals("false")) {
+					if (!map.get("success").equals("true")) {
 
 						logger.info("江苏电商支付启动线程进行异步通知");
 						// 启线程进行异步通知
@@ -1184,7 +1189,7 @@ public class ConformityQucikPayController extends BaseAction {
 							map.put("success", value);
 						}
 					}
-					if (map.get("success").equals("false")) {
+					if (!map.get("success").equals("true")) {
 
 						logger.info("天下付支付启动线程进行异步通知");
 						// 启线程进行异步通知
@@ -1197,6 +1202,183 @@ public class ConformityQucikPayController extends BaseAction {
 					result.put("v_msg", "请求失败");
 				}
 			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+		/**
+		 * 易票联同步响应信息
+		 *
+		 * @param request
+		 * @param response
+		 * @throws Exception
+		 */
+		@ResponseBody
+		@RequestMapping(value = "yplReturnUrl")
+		public void yplReturnUrl(HttpServletRequest request, HttpServletResponse response) {
+			try {
+				logger.info("############易票联同步##################");
+				request.getSession();
+				String orderId = request.getParameter("out_trade_no");
+				logger.info("易票联同步返回的订单号" + orderId);
+				OriginalOrderInfo originalInfo = null;
+				if (orderId != null && orderId != "") {
+					originalInfo = conformityService.getOriginOrderInfo(orderId);
+				}
+				logger.info("易票联同步原始订单数据:" + JSON.toJSON(originalInfo));
+				logger.info("易票联给下游的同步地址" + originalInfo.getPageUrl());
+				TreeMap<String, String> result = new TreeMap<String, String>();
+				String params = "";
+				if (!StringUtils.isEmpty(orderId)) {
+					ChannleMerchantConfigKey keyinfo = conformityService.getChannelConfigKey(originalInfo.getPid());
+					// 获取商户秘钥
+					String key = keyinfo.getMerchantkey();
+					result.put("v_oid", originalInfo.getOrderId());
+					result.put("v_txnAmt", originalInfo.getOrderAmount());
+					result.put("v_code", "00");
+					result.put("v_msg", "请求成功");
+					result.put("v_time", originalInfo.getOrderTime());
+					result.put("v_mid", originalInfo.getPid());
+					ConformityQucikPayResponseEntity consumeResponseEntity = (ConformityQucikPayResponseEntity) BeanToMapUtil
+							.convertMap(ConformityQucikPayResponseEntity.class, result);
+					String sign = SignatureUtil.getSign(beanToMap(consumeResponseEntity), key);
+					result.put("v_sign", sign);
+					params = HttpClientUtil.parseParams(result);
+					logger.info("易票联同步给下游的数据:" + params);
+					request.getSession();
+					try {
+						// 给下游手动返回支付结果
+						if (originalInfo.getPageUrl().indexOf("?") == -1) {
+
+							String path = originalInfo.getPageUrl() + "?" + params;
+							logger.info("易票联 重定向地址：" + path);
+
+							response.sendRedirect(path.replace(" ", ""));
+						} else {
+							logger.info("易票联 重定向地址：" + originalInfo.getPageUrl());
+							String path = originalInfo.getPageUrl() + "&" + params;
+							logger.info("易票联 重定向地址：" + path);
+							response.sendRedirect(path.replace(" ", ""));
+						}
+					} catch (Exception e) {
+						// TODO: handle exception
+						e.printStackTrace();
+					}
+
+				} else {
+					logger.info("没有收到易票联的同步数据");
+				}
+
+			} catch (Exception e) {
+				// TODO: handle exception
+				e.printStackTrace();
+			}
+
+		}
+		/**
+		 * 易票联异步响应信息
+		 * 
+		 * @param request
+		 * @param response
+		 * @throws Exception
+		 */
+		@ResponseBody
+		@RequestMapping(value = "yplNotifyUrl")
+		public void yplNotifyUrl(HttpServletRequest request, HttpServletResponse response) {
+			try {
+				logger.info("############易票联异步##################");
+				request.getSession();
+				String out_trade_no = request.getParameter("out_trade_no");
+				String pay_result = request.getParameter("pay_result");
+				String dec_fee_rate = request.getParameter("out_trade_no");
+				String dec_fee = request.getParameter("out_trade_no");
+				Map<String, String> result = new HashMap<String, String>();
+				logger.info("异步异步获取参数：" + out_trade_no);
+				if (!StringUtils.isEmpty(out_trade_no)) {
+					outString(response, "success");
+					logger.info("易票联订单号:" + out_trade_no);
+					// 开始解密
+					Map<String, String> jsonMap = new HashMap<>();
+					logger.info("易票联异步解析之后的数据:" + jsonMap);
+
+					logger.info("易票联支付异步返回的订单状态:" + pay_result);
+					logger.info("易票联支付异步返回的订单号:" + out_trade_no);
+					OriginalOrderInfo originalInfo = null;
+					if (out_trade_no != null && out_trade_no != "") {
+						originalInfo = conformityService.getOriginOrderInfo(out_trade_no);
+					}
+					logger.info("易票联支付异步原始订单交易时间:" + originalInfo.getOrderTime());
+					result.put("v_mid", originalInfo.getPid());
+					result.put("v_oid", originalInfo.getOrderId());
+					result.put("v_txnAmt", originalInfo.getOrderAmount());
+					result.put("v_time", originalInfo.getOrderTime());
+					result.put("v_code", "00");
+					result.put("v_msg", "请求成功");
+					result.put("v_attach", originalInfo.getAttach());				
+					if ("1".equals(pay_result)) {
+
+						result.put("v_payStatus", "0000");
+						result.put("v_payMsg", "支付成功");
+						int i = conformityService.updatePmsMerchantInfo(originalInfo);
+						if (i > 0) {
+							logger.info("天下付*****实时入金完成");
+						} else {
+							logger.info("天下付*****实时入金失败");
+						}
+					}else if("0".equals(pay_result)){
+						
+					} else if("2".equals(pay_result)){
+						result.put("v_payStatus", "1001");
+						result.put("v_payMsg", "支付失败:"+URLDecoder.decode(request.getParameter("payMsg")));
+						logger.info("交易错误码:" + request.getParameter("payStatus") + ",错误信息:"
+								+ URLDecoder.decode(request.getParameter("payMsg"), "UTF-8"));
+					}
+					ChannleMerchantConfigKey keyinfo =conformityService.getChannelConfigKey(originalInfo.getPid());
+					// 获取商户秘钥
+					String key = keyinfo.getMerchantkey();
+					CallbackEntity consume = (CallbackEntity ) BeanToMapUtil
+							.convertMap(CallbackEntity.class, result);
+					// 修改订单状态
+					conformityService.otherInvoke(out_trade_no,result.get("v_payStatus"));
+					logger.info("易票联支付异步回调地址:" + originalInfo.getBgUrl());
+					// 生成签名
+					String sign = SignatureUtil.getSign(beanToMap(consume), key);
+					result.put("v_sign", sign);
+
+					logger.info("易票联支付异步封装前参数：" + result);
+					CallbackEntity consumeResponseEntity = (CallbackEntity) BeanToMapUtil
+							.convertMap(CallbackEntity.class, result);
+					logger.info("易票联支付异步封装后参数：" + HttpClientUtil.bean2QueryStr(consumeResponseEntity));
+					String html = HttpClientUtil.post(originalInfo.getBgUrl(),
+							HttpClientUtil.bean2QueryStr(consumeResponseEntity));
+					logger.info("易票联支付下游响应信息:" + html);
+					JSONObject ob = JSONObject.fromObject(html);
+					Iterator it = ob.keys();
+					Map<String, String> map = new HashMap<>();
+					while (it.hasNext()) {
+						String keys = (String) it.next();
+						if (keys.equals("success")) {
+							String value = ob.getString(keys);
+							logger.info("易票联支付回馈的结果:" + "\t" + value);
+							map.put("success", value);
+						}
+					}
+					if (!map.get("success").equals("true")) {
+
+						logger.info("易票联支付启动线程进行异步通知");
+						// 启线程进行异步通知
+						ThreadPool.executor(new QuickPayThread(originalInfo.getBgUrl(), HttpClientUtil.bean2QueryStr(consumeResponseEntity)));
+					}
+					logger.info("易票联支付向下游 发送数据成功");
+
+				} else {
+					outString(response, "fail");
+					logger.error("易票联回调的参数为空!");
+					result.put("v_code", "15");
+					result.put("v_msg", "请求失败");
+				}
+				// outString(response, str);
+			} catch (Exception e) {
+				logger.info("易票联异步回调异常:" + e);
 				e.printStackTrace();
 			}
 		}
