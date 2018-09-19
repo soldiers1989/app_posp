@@ -5565,10 +5565,16 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			if(!map.isEmpty()) {
 				result.put("v_code", "00");
 				result.put("v_msg", "请求成功");
+				
+				
 				if("0000".equals(map.get("respCode"))) {
 					if(!"".equals(map.get("trans"))||map.get("trans")!=null) {
 					    map.putAll(XmlToMap.strXmlToMap(map.get("trans")));
 					    log.info("易票联查询返回数据解析后的2:"+JSON.toJSONString(map));
+					    PmsDaifuMerchantInfo pdf = new PmsDaifuMerchantInfo();
+						pdf.setBatchNo(batchNo);
+						pdf.setPmsbankno(map.get("busiRefNo"));
+						pmsDaifuMerchantInfoDao.update(pdf);
 						if("1".equals(map.get("status"))) {
 							result.put("v_status", "0000");
 							result.put("v_status_msg", "代付成功");
