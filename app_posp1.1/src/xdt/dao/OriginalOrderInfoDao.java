@@ -29,7 +29,16 @@ public interface OriginalOrderInfoDao extends IBaseDao<OriginalOrderInfo> {
 	 */
 	public OriginalOrderInfo getOriginalOrderInfoByMerchanOrderId(String merchantOrderId);
 	
+	/**
+	 * 查询用户信息
+	 * 
+	 * @param merchantOrderId
+	 *            下游商户订单ids
+	 * @return
+	 */
+	public OriginalOrderInfo getOriginalOrderInfoByUserId(String userId);
 	
+	public OriginalOrderInfo  selectByCode(OriginalOrderInfo model);
 	 
 	/** 
 	 * @Description 

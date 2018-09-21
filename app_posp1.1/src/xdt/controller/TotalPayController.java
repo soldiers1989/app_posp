@@ -292,6 +292,26 @@ public class TotalPayController extends BaseAction {
 						
 			        } 
 					break;
+				case "TL":
+					log.info("下游上送签名串{}" + payRequest.getV_sign());
+					// 查询商户密钥
+					
+					// ------------------------需要改签名
+					String merchantKey = keyinfo.getMerchantkey();
+					
+					if (signUtil.checkSign(map, merchantKey, log)) {
+
+						log.info("对比签名成功");
+						
+						result = service.pay(payRequest, result);
+
+					} else {
+						log.error("签名错误!");
+						result.put("v_code", "02");
+						result.put("v_msg", "签名错误!");
+						log.info("返回的参数:" + JSON.toJSON(result));
+					}
+					break;
 				default:
 					//检验数据是否合法
 					if (service.validationStr(payRequest)) {
@@ -299,7 +319,7 @@ public class TotalPayController extends BaseAction {
 						// 查询商户密钥
 						
 						// ------------------------需要改签名
-						String merchantKey = keyinfo.getMerchantkey();
+						 merchantKey = keyinfo.getMerchantkey();
 						
 						if (signUtil.checkSign(map, merchantKey, log)) {
 

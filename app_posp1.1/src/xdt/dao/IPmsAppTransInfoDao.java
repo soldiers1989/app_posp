@@ -170,4 +170,6 @@ public interface IPmsAppTransInfoDao extends IBaseDao<PmsAppTransInfo> {
 	 * @throws Exception
 	 */
 	public List<PmsAppTransInfo> searchMyorder1() throws Exception;
+	
+	public String selectBymeridDate(PmsAppTransInfo pmsAppTransInfo);
 }

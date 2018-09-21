@@ -82,6 +82,19 @@
 		ACCOUNTINGFLAG,
 		SERIALNO,BUSINESSNUM,CHANNELNUM,SEARCHNUM,OAGENTNO,AUTHPATH,ALTLAT,GPSADDRESS,CERTNO,TOKEN
 	</sql>
+		<!-- 公用的判断条件 -->
+	<sql id="configParamSql">
+		<if test="searchBean.mercid!=null  and  searchBean.mercid!=''">
+			and t.MERCID = #{searchBean.mercid}
+		</if>
+		<if test="searchBean.status !=null  and  searchBean.status !=''">
+			and t.STATUS=#{searchBean.status}
+		</if>
+		<if test="searchBean.tradetime !=null  and  searchBean.tradetime !=''">
+			and t.TRADETIME like '%${searchBean.tradetime}%'
+		</if>
+
+	</sql>
 	<select id="selectByPrimaryKey" resultMap="BaseResultMap"
 		parameterType="java.math.BigDecimal">
 		select
@@ -740,7 +753,14 @@
 		t.tradetime between #{startTime} and #{endTime} and t.STATUS!=3 order
 		by t.id desc
 	</select>
-
+	  <!-- 根据商户号和日期查询交易记录 -->
+	<select id="selectByMeridDate" parameterType="java.lang.String"
+		resultMap="BaseResultMap">
+		select sum(t.factamount) from PMS_APP_TRANS_INFO t 
+		<where>
+		   <include refid="configParamSql" />
+		</where>
+	</select>
 	<!-- 查询当天状态为 null/200（初始），2（平台支付中（百度，支付宝....），4（平台支付完成，等待调用通道支付），5（通道等待支付（欧飞...））） 
 		并且非5分钟之内产生的数据 @author Jeff -->
 	<select id="selecNeedCallBack" resultMap="BaseResultMap">

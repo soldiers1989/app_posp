@@ -81,7 +81,12 @@ public class PmsAppTransInfoDaoImpl extends BaseDaoImpl<PmsAppTransInfo> impleme
 		String sql = getStatementId(UPDATEXL);
 		return sqlSession.update(sql,map);
 	}
-	
+	@Override
+	public String selectBymeridDate(PmsAppTransInfo pmsAppTransInfo) {
+		
+		  String sql = getStatementId("selectByMeridDate");
+	      return sqlSession.selectOne(sql,pmsAppTransInfo);
+	}
 	
 	
 	

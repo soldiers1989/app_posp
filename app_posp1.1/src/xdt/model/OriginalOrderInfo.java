@@ -37,6 +37,10 @@ public class OriginalOrderInfo {
     private String byUser;//支付宝或微信登陆名
     private String url;//支付url,给用户扫码用
     
+    private String tieCardPageUrl;//绑卡同步地址
+    
+    private String tieCardUrl;//绑卡异步地址
+    
     private String realName; //真实姓名
     
     private String bankType; //银行类型
@@ -66,6 +70,8 @@ public class OriginalOrderInfo {
     private String userId;//用户唯一标志
     
     private String verifyId;//卡信息唯一值
+    
+    private String status;//状态码
     
     
 	public String getUserId() {
@@ -307,8 +313,29 @@ public class OriginalOrderInfo {
 	public void setSettleUserFee(String settleUserFee) {
 		this.settleUserFee = settleUserFee;
 	}
-    
 
-	
+	public String getTieCardPageUrl() {
+		return tieCardPageUrl;
+	}
+
+	public void setTieCardPageUrl(String tieCardPageUrl) {
+		this.tieCardPageUrl = tieCardPageUrl;
+	}
+
+	public String getTieCardUrl() {
+		return tieCardUrl;
+	}
+
+	public void setTieCardUrl(String tieCardUrl) {
+		this.tieCardUrl = tieCardUrl;
+	}
+
+	public String getStatus() {
+		return status;
+	}
+
+	public void setStatus(String status) {
+		this.status = status;
+	}
     
 }

@@ -43,7 +43,7 @@
 		PAY_TYPE, BANK_ID,
 		PROCDUT_NAME,
 		PROCDUT_NUM, PROCDUT_DESC, PAGE_URL,
-		BG_URL,BANK_NO,BY_USER,URL,REAL_NAME,BANK_TYPE,PHONE,CVN2,EXPIRED,ATTACH,CERT_NO,SUMCODE,SETTLECARDNO,SETTLEUSERNAME,SETTLEPMSBANKNO,USERFEE,SETTLEUSERFEE
+		BG_URL,BANK_NO,BY_USER,URL,REAL_NAME,BANK_TYPE,PHONE,CVN2,EXPIRED,ATTACH,CERT_NO,SUMCODE,SETTLECARDNO,SETTLEUSERNAME,SETTLEPMSBANKNO,USERFEE,SETTLEUSERFEE,TIECARDPAGEURL,TIECARDURL
 	</sql>
 	<!-- 查询主键对象记录 -->
 	<select id="selectByPrimaryKey" resultMap="BaseResultMap"
@@ -89,7 +89,24 @@
 		#{merchantOrderId,jdbcType=VARCHAR}
 		AND PID=#{pid,jdbcType=VARCHAR}
 	</select>
-
+		<select id="selectByCode" parameterType="xdt.model.OriginalOrderInfo"
+		resultMap="BaseResultMap">
+		select
+		<include refid="Base_Column_List" />
+		from ORIGINAL_ORDER_INFO
+		where CERT_NO =
+		#{certNo,jdbcType=VARCHAR}
+		AND
+		SUMCODE=#{sumCode,jdbcType=VARCHAR}
+	</select>
+   <!-- 根据用户唯一标示 查询用户信息 -->
+	<select id="getOriginalOrderInfoByUserId" resultMap="BaseResultMap"
+		parameterType="java.lang.String">
+		select
+		<include refid="Base_Column_List" />
+		from ORIGINAL_ORDER_INFO
+		where BY_USER = #{byUser,jdbcType=VARCHAR}
+	</select>
 
 	<!-- 删除主键对应记录 -->
 	<delete id="deleteByPrimaryKey" parameterType="java.lang.String">
@@ -210,6 +227,12 @@
 			<if test="verifyId != null">
 				verifyId,
 			</if>
+			<if test="tieCardPageUrl != null">
+				TIECARDPAGEURL,
+			</if>
+			<if test="tieCardUrl != null">
+				TIECARDURL,
+			</if>
 		</trim>
 		<trim prefix="values (" suffix=")" suffixOverrides=",">
 			<if test="orderId != null">
@@ -298,6 +321,12 @@
 			</if>
 			<if test="verifyId != null">
 				#{verifyId,jdbcType=VARCHAR},
+			</if>
+			<if test="tieCardPageUrl != null">
+				#{tieCardPageUrl,jdbcType=VARCHAR},
+			</if>
+			<if test="tieCardUrl != null">
+				#{tieCardUrl,jdbcType=VARCHAR},
 			</if>
 		</trim>
 	</insert>

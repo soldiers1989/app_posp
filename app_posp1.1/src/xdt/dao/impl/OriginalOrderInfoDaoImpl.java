@@ -41,5 +41,16 @@ public class OriginalOrderInfoDaoImpl extends BaseDaoImpl<OriginalOrderInfo> imp
 		String sql = this.getStatementId("selectByCjtOriginal"); 
 		return sqlSession.selectOne(sql,model);
 	}
+	@Override
+	public OriginalOrderInfo selectByCode(OriginalOrderInfo model) {
+		// TODO Auto-generated method stub
+		String sql = this.getStatementId("selectByCode"); 
+		return sqlSession.selectOne(sql,model);
+	}
+	public OriginalOrderInfo getOriginalOrderInfoByUserId(String byUser) {
+		// TODO Auto-generated method stub
+		String sql = this.getStatementId("getOriginalOrderInfoByUserId"); 
+		return sqlSession.selectOne(sql,byUser);
+	}
 
 }

@@ -48,6 +48,9 @@
 		<result column="rateCode" property="rateCode" jdbcType="VARCHAR" />
 		<result column="walletD0" property="walletD0" jdbcType="VARCHAR" />
 		<result column="walletT1" property="walletT1" jdbcType="VARCHAR" />
+		<result column="DFPRIVATEKEY" property="dfPrivateKey" jdbcType="VARCHAR" />
+		<result column="DFSUBCONTRACTID" property="dfSubContractId" jdbcType="VARCHAR" />
+		<result column="APPID" property="appId" jdbcType="VARCHAR" />
 	</resultMap>
 	<sql id="Base_Column_List">
 		ACCOUNT, MERCHART_ID, PASSWORD, REAL_NAME, MERCHART_NAME,
@@ -59,7 +62,7 @@
 		UPDATE_DATE,WX_RATE
 		,ALIPAY_RATE,WXT0FEE,ALIPAYT0FEE,OAGENTNO,SUBCONTRACTID
 		,ALIPAY_RATE,WXT0FEE,ALIPAYT0FEE,OAGENTNO,blendFee,standard,withdrawDepositRate,withdrawDepositSingleFee,bankCode
-		,bankAbbr,debitRate,debitCapAmount,creditRate,rateCode,walletD0,walletT1
+		,bankAbbr,debitRate,debitCapAmount,creditRate,rateCode,walletD0,walletT1,dfPrivateKey,dfSubContractId,APPID
 	</sql>
 	<select id="selectByPrimaryKey" resultMap="BaseResultMap"
 		parameterType="java.lang.String">
@@ -450,11 +453,26 @@
 			<if test="location != null">
 				LOCATION = #{location,jdbcType=VARCHAR},
 			</if>
+			<if test="subContractId != null">
+				SUBCONTRACTID = #{subContractId,jdbcType=DECIMAL},
+			</if>
 			<if test="status != null">
 				STATUS = #{status,jdbcType=DECIMAL},
 			</if>
 			<if test="privateKey != null">
 				PRIVATE_KEY = #{privateKey,jdbcType=VARCHAR},
+			</if>
+			<if test="dfSubContractId != null">
+				DFSUBCONTRACTID = #{dfSubContractId,jdbcType=VARCHAR},
+			</if>
+			<if test="appId != null">
+				APPID = #{appId,jdbcType=VARCHAR},
+			</if>
+			<if test="dfPrivateKey != null">
+				DFPRIVATEKEY = #{dfPrivateKey,jdbcType=VARCHAR},
+			</if>
+			<if test="status != null">
+				STATUS = #{status,jdbcType=DECIMAL},
 			</if>
 			<if test="createDate != null">
 				CREATE_DATE = #{createDate,jdbcType=TIMESTAMP},

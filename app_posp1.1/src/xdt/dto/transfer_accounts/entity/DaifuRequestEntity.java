@@ -37,6 +37,8 @@ public class DaifuRequestEntity {
 	
 	private String v_bankCode;//银行编码//新填ABC
 	
+	private String v_cvn2; //信用卡背面末三位	
+	
 	private String v_bankNumber;//银行编号103
 	
 	private String v_amount;//付款金额
@@ -68,6 +70,10 @@ public class DaifuRequestEntity {
 	private MultipartFile  v_fileName;
 	
 	private String v_notify_url;//异步地址
+	
+	private String v_expired;//信用卡有效期
+	
+	private String v_settfee; //提现手续费
 	
 	
 	public String getV_notify_url() {
@@ -284,6 +290,30 @@ public class DaifuRequestEntity {
 
 	public void setV_cert_no(String v_cert_no) {
 		this.v_cert_no = v_cert_no;
+	}
+
+	public String getV_cvn2() {
+		return v_cvn2;
+	}
+
+	public void setV_cvn2(String v_cvn2) {
+		this.v_cvn2 = v_cvn2;
+	}
+
+	public String getV_expired() {
+		return v_expired;
+	}
+
+	public void setV_expired(String v_expired) {
+		this.v_expired = v_expired;
+	}
+
+	public String getV_settfee() {
+		return v_settfee;
+	}
+
+	public void setV_settfee(String v_settfee) {
+		this.v_settfee = v_settfee;
 	}
 	
 	

@@ -183,6 +183,12 @@ public class ConformityQucikPayController extends BaseAction {
 					response.sendRedirect(RSAUtils.cardPayApplyApi + "?cipher_data="
 							+ URLEncoder.encode(result.get("cipherData"), RSAUtils.serverEncodeType));
 					break;
+				case "GFB"://国付宝快捷
+					result.remove("v_code");
+					result.remove("v_msg");
+					result.put("url", "https://gateway.gopay.com.cn/Trans/WebClientAction.do");
+					request.setAttribute("temp", result);
+					request.getRequestDispatcher("/quick/quick_conformity_submits.jsp").forward(request, response);
 				case "YPL"://易票联
 					url =result.get("pay_url")+ "?"+result.get("cipherData");
 					logger.info("易票联快捷上送的数据:" + url);

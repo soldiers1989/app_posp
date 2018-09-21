@@ -32,6 +32,8 @@ public class PmsWeixinMerchartInfo {
 	private Integer status;// 状态
 
 	private String privateKey;//私钥
+	
+	private String dfPrivateKey;//代付私钥
 
 	private Date createDate;//创建日期
 
@@ -116,7 +118,9 @@ public class PmsWeixinMerchartInfo {
 	private String oAgentNo; //欧单编号
 	
     private String licenseImage;//营业执照(如XXX.jpg 或 dir/XXX.jpg,不支持中文命名)   
-    private String subContractId;//子协议编号	
+    private String subContractId;//子协议编号
+    
+    private String dfSubContractId;//代付子协议编号
     
     
 	private String blendFee;//混合快捷费率
@@ -772,6 +776,22 @@ public class PmsWeixinMerchartInfo {
 
 	public void setStandard(String standard) {
 		this.standard = standard;
+	}
+
+	public String getDfPrivateKey() {
+		return dfPrivateKey;
+	}
+
+	public void setDfPrivateKey(String dfPrivateKey) {
+		this.dfPrivateKey = dfPrivateKey;
+	}
+
+	public String getDfSubContractId() {
+		return dfSubContractId;
+	}
+
+	public void setDfSubContractId(String dfSubContractId) {
+		this.dfSubContractId = dfSubContractId;
 	}
     
 	
