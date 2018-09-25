@@ -44,21 +44,24 @@ PUBLIC '-//mybatis.org//DTD Mapper 3.0//EN'
 	<select id="selectList" resultMap="resultMap" parameterType="xdt.model.PmsDangerControlBlack">
 		select * from pms_danger_control_black
 		<where>
+			<if test="mercId !=null  and  mercId !=''">
+				and MERCID=#{mercId}
+			</if>
 			<if test="cardNo !=null  and  cardNo !=''">
 				and cardNo=#{cardNo}
 			</if>
-			<!-- <if test="realname !=null  and  realname !=''">
+			<if test="realname !=null  and  realname !=''">
 				and realname=#{realname}
 			</if>
 			<if test="certNo !=null  and  certNo !=''">
-				and quotaType=#{quotaType}
+				and certNo=#{certNo}
 			</if>
 			<if test="addAgentNumber !=null  and  addAgentNumber !=''">
 				and addAgentNumber=#{addAgentNumber}
 			</if>
 			<if test="remarks !=null  and  remarks !=''">
 				and remarks=#{remarks}
-			</if> -->
+			</if>
 		</where>
 	</select>
 	<insert id="save" parameterType="xdt.model.PmsDangerControlBlack">
