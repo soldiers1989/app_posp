@@ -2153,4 +2153,142 @@ public class TotalPayController extends BaseAction {
 		}
 		System.out.println(JSON.toJSON(map));
 	}
+	/**
+	 * 通联代付异步通知
+	 * @param response
+	 * @param request
+	 * @throws IOException 
+	 */
+	@RequestMapping(value="tfNotifyUrl")
+	public void tfNotifyUrl(HttpServletResponse response,HttpServletRequest request) throws IOException {
+		log.info("通联代付异步来了！");
+		  String dfRetCode = request.getParameter("dfRetCode");
+	      String dfRetMsg = request.getParameter("dfRetMsg");
+	      String orderId = request.getParameter("orderId");
+		 log.info("通联代付异步返回的状态码："+dfRetCode);
+		 log.info("通联代付异步返回的状态信息："+dfRetMsg);
+		 log.info("通联代付异步返回的订单号："+orderId);
+		Map<String, String> maps =new HashMap<>();
+		request.getSession();
+		ChannleMerchantConfigKey keyinfo=new ChannleMerchantConfigKey();	
+		OriginalOrderInfo originalInfo=null;
+		if(dfRetCode!=""&&dfRetCode!=null) {	
+			    response.getWriter().write("SUCCESS");				
+				PmsDaifuMerchantInfo pmsDaifuMerchantInfo =new PmsDaifuMerchantInfo();
+				pmsDaifuMerchantInfo.setBatchNo(orderId);
+				List<PmsDaifuMerchantInfo> pmsDaifuMerchantInfos =service.selectDaifu(pmsDaifuMerchantInfo);
+				String type="";
+				if("D0".equals(pmsDaifuMerchantInfos.get(0).getRemarks())){
+					type="0";
+				}else if("T1".equals(pmsDaifuMerchantInfos.get(0).getRemarks())) {
+					type="1";
+				}
+									
+					try {
+						originalInfo  = this.gateWayService.getOriginOrderInfos(orderId);
+						keyinfo = clientCollectionPayService.getChannelConfigKey(originalInfo.getPid());
+					} catch (Exception e) {
+						
+						e.printStackTrace();
+					}
+					log.info("通联代付订单数据:" + JSON.toJSON(originalInfo));
+					
+					log.info("通联代付下游的异步地址" + originalInfo.getBgUrl());
+					maps.put("v_mid", originalInfo.getPid());
+					maps.put("v_oid", originalInfo.getOrderId());
+					maps.put("v_txnAmt", originalInfo.getOrderAmount());
+					maps.put("v_attach", originalInfo.getAttach());
+					maps.put("v_code", "00");
+					maps.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+					maps.put("v_status", "200");
+					maps.put("v_msg", "代付成功");
+					if("00".equals(dfRetCode)) {
+						maps.put("v_status", "0000");
+						maps.put("v_msg", "代付成功");
+						try {
+							service.UpdateDaifu(originalInfo.getOrderId(), "00");
+						} catch (Exception e) {
+							log.info("通联代付修改成功代付状态异常："+e);
+							e.printStackTrace();
+						}
+					}else{
+							maps.put("v_status", "1001");
+							maps.put("v_msg", dfRetMsg);
+							try {
+								service.UpdateDaifu(originalInfo.getOrderId(), "02");
+							} catch (Exception e) {
+								log.info("通联代付修改失败代付状态异常："+e);
+								e.printStackTrace();
+							}
+							Map<String, String> map =new HashMap<>();
+							map.put("machId",originalInfo.getPid());
+							map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))*100+"");
+							int nus =0;
+							if("0".equals(type)) {
+								nus =service.updataPay(map);
+							}else if("1".equals(type)){
+								nus =service.updataPayT1(map);
+							}
+							if(nus==1) {
+								log.info("通联代付补款成功");
+								DaifuRequestEntity entity =new DaifuRequestEntity();
+				 				entity.setV_mid(pmsDaifuMerchantInfos.get(0).getMercId());
+				 				entity.setV_batch_no(pmsDaifuMerchantInfos.get(0).getBatchNo()+"/A");
+				 				entity.setV_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+				 				entity.setV_sum_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+				 				entity.setV_identity(pmsDaifuMerchantInfos.get(0).getIdentity());
+				 				entity.setV_cardNo(pmsDaifuMerchantInfos.get(0).getCardno());
+				 				entity.setV_city(pmsDaifuMerchantInfos.get(0).getCity());
+				 				entity.setV_province(pmsDaifuMerchantInfos.get(0).getProvince());
+				 				entity.setV_type(type);
+				 				entity.setV_pmsBankNo(pmsDaifuMerchantInfos.get(0).getPmsbankno());
+				 				PmsMerchantInfo merchantinfo =new PmsMerchantInfo();
+								int ii;
+								try {
+									ii = service.add(entity, merchantinfo, maps, "00");
+									log.info("通联代付补款订单状态："+ii);
+								} catch (Exception e) {
+									log.info("通联代付补款状态异常："+e);
+									e.printStackTrace();
+								}
+								
+							}else {
+								log.info("通联代付补款失败");
+							}
+						}
+						
+					}
+					ScanCodeResponseEntity consume = (ScanCodeResponseEntity) BeanToMapUtil
+							.convertMap(ScanCodeResponseEntity.class, maps);
+					String signs = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
+					maps.put("v_sign", signs);
+					String params = HttpURLConection.parseParams(maps);
+					log.info("国付宝代付给下游同步的数据:" + params);
+					String html;
+					try {
+						html = HttpClientUtil.post(originalInfo.getBgUrl(), params);
+						logger.info("下游返回状态" + html);
+						JSONObject ob = JSONObject.fromObject(html);
+						Iterator it = ob.keys();
+						Map<String, String> resp = new HashMap<>();
+						while (it.hasNext()) {
+							String keys = (String) it.next();
+							if (keys.equals("success")) {
+								String value = ob.getString(keys);
+								logger.info("异步回馈的结果:"+ value);
+								resp.put("success", value);
+							}
+						}
+						if (!resp.get("success").equals("true")) {
+		
+							logger.info("启动线程进行异步通知");
+							// 启线程进行异步通知
+							ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(), params));
+							logger.info("国付宝代付向下游 发送数据成功");
+						}
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+	}
 }

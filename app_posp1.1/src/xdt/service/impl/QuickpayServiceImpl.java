@@ -404,7 +404,7 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 		logger.info("根据上送订单号  查询商户上送原始信息");
 		original = originalDao.getOriginalOrderInfoByOrderid(oderId);
 		return original;
-		
+
 	}
 
 	public Map<String, String> updateHandle(MessageRequestEntity originalinfo) throws Exception {
@@ -546,8 +546,2322 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 				pmsQuota.setMercId(merchantinfo.getMercId());
 
 				List<PmsDangerControlQuota> PmsQuodaList = pmsDangerControlQuota.searchList(pmsQuota);
-				if (!(PmsQuodaList.size() == 0 || PmsQuodaList.isEmpty())) {
+				if (PmsQuodaList.size() == 0 || PmsQuodaList.isEmpty()) {
 
+					// 校验商户号是否在黑名单中
+					PmsDangerControlBlack pmsBlackMerID = new PmsDangerControlBlack();
+					pmsBlackMerID.setMercId(merchantinfo.getMercId());
+					List<PmsDangerControlBlack> pmsBlackListMerID = pmsDangerControlBlack.searchList(pmsBlackMerID);
+					if (pmsBlackListMerID.size() == 0 || pmsBlackListMerID.isEmpty()) {
+
+						// 校验卡号是否在黑名单中
+						PmsDangerControlBlack pmsBlackCardNo = new PmsDangerControlBlack();
+						pmsBlackCardNo.setCardNo(originalinfo.getV_cardNo());
+						List<PmsDangerControlBlack> pmsBlackListCardNo = pmsDangerControlBlack
+								.searchList(pmsBlackCardNo);
+						if (pmsBlackListCardNo.size() == 0 || pmsBlackListCardNo.isEmpty()) {
+							// 校验证件号是否在黑名单中
+							PmsDangerControlBlack pmsBlackCerdNo = new PmsDangerControlBlack();
+							pmsBlackCerdNo.setCertNo(originalinfo.getV_cert_no());
+							List<PmsDangerControlBlack> pmsBlackListCerdNo = pmsDangerControlBlack
+									.searchList(pmsBlackCerdNo);
+							if (pmsBlackListCerdNo.size() == 0 || pmsBlackListCerdNo.isEmpty()) {
+
+								// 校验姓名是否在黑名单中
+								PmsDangerControlBlack pmsBlackName = new PmsDangerControlBlack();
+								pmsBlackName.setRealname(originalinfo.getV_realName());
+								List<PmsDangerControlBlack> pmsBlackListName = pmsDangerControlBlack
+										.searchList(pmsBlackName);
+								if (pmsBlackListName.size() == 0 || pmsBlackListName.isEmpty()) {
+
+									// 实际金额
+									String factAmount = ""
+											+ new BigDecimal(originalinfo.getV_txnAmt()).multiply(new BigDecimal(100));
+
+									if (pmsBusinessPos == null) {
+										retMap.put("v_code", "18");
+										retMap.put("v_msg", "未找到路由，请联系业务开通！");
+										return retMap;
+									}
+									// 判断入金是否开启
+									if ("1".equals(pmsBusinessPos.getOutPay())) {
+										retMap.put("v_code", "19");
+										retMap.put("v_msg", "入金未开通,请联系业务经理!");
+										return retMap;
+									}
+									// 校验欧单金额限制
+									ResultInfo payCheckResult = iPublicTradeVerifyService.amountVerifyOagent(
+											(int) Double.parseDouble(factAmount), TradeTypeEnum.merchantCollect,
+											oAgentNo);
+									if (!payCheckResult.getErrCode().equals("0")) {
+										// 交易不支持
+										logger.info("欧单金额限制，oAagentNo:" + oAgentNo + ",payType:"
+												+ PaymentCodeEnum.moBaoQuickPay.getTypeCode());
+										return setResp("05", "欧单金额限制，请重试或联系客服");
+									}
+
+									// 校验欧单模块是否开启
+									ResultInfo resultInfoForOAgentNo = iPublicTradeVerifyService
+											.moduleVerifyOagent(TradeTypeEnum.merchantCollect, oAgentNo);
+									if (!resultInfoForOAgentNo.getErrCode().equals("0")) {
+										// 交易不支持
+										if (StringUtils.isEmpty(resultInfoForOAgentNo.getMsg())) {
+											logger.error("交易关闭，请重试或联系客服");
+											return setResp("06", "交易关闭，请重试或联系客服");
+										} else {
+											return setResp("07", "系统异常，请重试或联系客服");
+										}
+
+									}
+									// 校验商户模块是否开启
+									ResultInfo payCheckResult3 = iPublicTradeVerifyService
+											.moduelVerifyMer(TradeTypeEnum.merchantCollect, mercId);
+									if (!payCheckResult3.getErrCode().equals("0")) {
+										// 交易不支持
+										logger.info("商户模块限制，oAagentNo:" + oAgentNo + ",payType:"
+												+ PaymentCodeEnum.moBaoQuickPay.getTypeCode());
+										return setResp("08", "商户模块限制,请重试或联系客服");
+									}
+									// 校验商户金额限制
+									Map<String, String> paramMap = new HashMap<String, String>();
+									paramMap.put("mercid", merchantinfo.getMercId());// 商户编号
+									paramMap.put("businesscode", TradeTypeEnum.merchantCollect.getTypeCode());// 业务编号
+									paramMap.put("oAgentNo", oAgentNo);
+									// 商户 网购 业务信息
+									Map<String, String> resultMap = merchantMineDao.queryBusinessInfo(paramMap);
+
+									if (resultMap == null || resultMap.size() == 0) {
+										// 若查到的是空值，直接返回错误
+										logger.info("没有查到相关费率配置：" + merchantinfo.getMobilephone());
+										return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
+									}
+
+									String maxTransMoney = resultMap.get("MAX_AMOUNT"); // 每笔最大交易金额
+									String minTransMoney = resultMap.get("MIN_AMOUNT"); // 每笔最小交易金额
+									String paymentAmount = factAmount;// 交易金额
+
+									if (new BigDecimal(paymentAmount).compareTo(new BigDecimal(maxTransMoney)) == 1) {
+										// 金额超过最大金额
+										logger.info("交易金额大于最打金额");
+										return setResp("10", "金额超过最大交易金额");
+									} else if (new BigDecimal(paymentAmount)
+											.compareTo(new BigDecimal(minTransMoney)) == -1) {
+										// 金额小于最小金额
+										logger.info("交易金额小于最小金额");
+										return setResp("11", "交易金额小于最小金额");
+
+									}
+
+									// 组装订单数据
+									PmsAppTransInfo pmsAppTransInfo = new PmsAppTransInfo();
+									// 写入欧单编号
+									pmsAppTransInfo.setoAgentNo(oAgentNo);
+									pmsAppTransInfo.setStatus(OrderStatusEnum.initlize.getStatus());// 订单初始化状态
+									pmsAppTransInfo.setTradetype(TradeTypeEnum.merchantCollect.getTypeName());// 业务功能模块名称
+									pmsAppTransInfo.setTradetime(UtilDate.getDateFormatter()); // 设置时间
+									pmsAppTransInfo.setMercid(merchantinfo.getMercId());
+									pmsAppTransInfo.setTradetypecode(TradeTypeEnum.merchantCollect.getTypeCode());// 业务功能模块编号
+									// ：17
+									pmsAppTransInfo.setOrderid(originalinfo.getV_oid());// 设置订单号
+									pmsAppTransInfo.setPaymenttype(PaymentCodeEnum.moBaoQuickPay.getTypeName());
+									pmsAppTransInfo.setPaymentcode(PaymentCodeEnum.moBaoQuickPay.getTypeCode());
+									BigDecimal factBigDecimal = new BigDecimal(factAmount);
+									BigDecimal orderAmountBigDecimal = new BigDecimal(factAmount);
+									pmsAppTransInfo.setBusinessNum(pmsBusinessPos.getBusinessnum());
+									pmsAppTransInfo.setFactamount(factBigDecimal.stripTrailingZeros().toPlainString());// 实际金额
+									pmsAppTransInfo
+											.setOrderamount(orderAmountBigDecimal.stripTrailingZeros().toPlainString());// 订单金额
+									pmsAppTransInfo.setDrawMoneyType("1");// 普通提款
+									if ("0".equals(originalinfo.getV_type())) {
+										pmsAppTransInfo.setSettlementState("D0");
+									}
+									if ("1".equals(originalinfo.getV_type())) {
+
+										pmsAppTransInfo.setSettlementState("T1");
+									}
+
+									// 插入订单信息
+									Integer insertAppTrans = pmsAppTransInfoDao.insert(pmsAppTransInfo);
+									if (insertAppTrans == 1) {
+
+										// 查询订单信息
+										pmsAppTransInfo = pmsAppTransInfoDao
+												.searchOrderInfo(pmsAppTransInfo.getOrderid());
+
+										String quickRateType = resultMap.get("QUICKRATETYPE").toString();// 快捷支付费率类型
+
+										// 获取o单第三方支付的费率
+										AppRateConfig appRate = new AppRateConfig();
+										appRate.setRateType(quickRateType);
+										appRate.setoAgentNo(oAgentNo);
+										AppRateConfig appRateConfig = appRateConfigDao
+												.getByRateTypeAndoAgentNo(appRate);
+
+										if (appRateConfig == null) {
+											// 若查到的是空值，直接返回错误
+											// 若查到的是空值，直接返回错误
+											logger.info("没有查到相关费率配置：" + merchantinfo.getMobilephone());
+											return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
+
+										}
+
+										String isTop = appRateConfig.getIsTop();
+										String rate = appRateConfig.getRate();
+										String topPoundage = appRateConfig.getTopPoundage();// 封顶手续费
+										paymentAmount = pmsAppTransInfo.getFactamount();// 支付金额
+										String minPoundageStr = appRateConfig.getBottomPoundage();// 最低手续费
+										Double minPoundage = 0.0; // 附加费
+
+										if (StringUtils.isNotBlank(appRateConfig.getIsBottom())
+												&& appRateConfig.getIsBottom().equals("1")) {// 是否有清算费用，"1":有，“0”无
+											if (StringUtils.isNotBlank(minPoundageStr)) {
+												minPoundage = Double.parseDouble(minPoundageStr); // 清算手续费
+											} else {
+												// 若查到的是空值，直接返回错误
+												logger.info("没有查到相关费率附加费（最低手续费）：" + merchantinfo.getMobilephone());
+												return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
+											}
+										}
+
+										BigDecimal payAmount = new BigDecimal("0");
+										BigDecimal dfactAmount = new BigDecimal(pmsAppTransInfo.getFactamount());
+										// 费率
+										BigDecimal fee = new BigDecimal(0);
+										Double settleFee = 0.0;
+										Double userfee = 0.0;
+										String rateStr = "";
+										// Double payfee = null;
+										// 计算结算金额
+										if ("1".equals(isTop)) {
+
+											rateStr = rate + "-" + topPoundage;
+											// 是封顶费率类型
+											fee = new BigDecimal(rate).multiply(dfactAmount);
+
+											if (fee.compareTo(new BigDecimal(topPoundage)) == 1) {
+												// 手续费大于封顶金额，按封顶金额处理
+												payAmount = dfactAmount.subtract(new BigDecimal(topPoundage)
+														.subtract(new BigDecimal(minPoundage)));
+												fee = new BigDecimal(topPoundage).add(new BigDecimal(minPoundage));
+											} else {
+												// 按当前费率处理
+												rateStr = rate;
+												fee.add(new BigDecimal(minPoundage));
+												payAmount = dfactAmount.subtract(fee);
+											}
+
+										} else {
+											// 按当前费率处理
+											double dfpag = Double.parseDouble(merchantinfo.getPoundage());
+											double daifu = Double.parseDouble(merchantinfo.getCounter());
+											if (!"".equals(originalinfo.getV_userFee())
+													&& originalinfo.getV_userFee() != null) {
+												userfee = Double.parseDouble(originalinfo.getV_userFee());
+											}
+
+											if (!"".equals(originalinfo.getV_settleUserFee())
+													&& originalinfo.getV_settleUserFee() != null) {
+												settleFee = Double.parseDouble(originalinfo.getV_settleUserFee());
+											}
+											if (originalinfo.getV_type().equals("1")) {
+												// 按当前费率处理
+												rateStr = rate;
+												if (Double.parseDouble(rateStr) <= userfee) {
+													BigDecimal num = dfactAmount.multiply(new BigDecimal(userfee));
+													if (num.doubleValue() / 100 >= daifu) {
+														fee = num;
+													} else {
+														fee = new BigDecimal(daifu * 100);
+													}
+													rateStr = userfee.toString();
+													payAmount = dfactAmount.subtract(fee);
+													logger.info("清算金额:" + paymentAmount);
+													if (payAmount.doubleValue() < 0) {
+														payAmount = new BigDecimal(0.00);
+													}
+
+												} else {
+													logger.info("费率低于成本费率：" + merchantinfo.getMercId());
+													return setResp("12", "费率低于成本费率");
+												}
+											} else if (originalinfo.getV_type().equals("0")) {
+
+												// 按当前费率处理
+												rateStr = rate;
+												if (Double.parseDouble(rateStr) <= userfee) {
+													fee = new BigDecimal(userfee).multiply(dfactAmount)
+															.add(new BigDecimal(minPoundage));
+												} else {
+													logger.info("费率低于成本费率：" + merchantinfo.getMercId());
+													return setResp("12", "费率低于成本费率");
+
+												}
+												if ("10044".equals(pmsBusinessPos.getBusinessnum())) {
+													if (dfpag > settleFee) {
+														logger.info("手续费低于最小手续费：" + merchantinfo.getMercId());
+														return setResp("20", "手续费低于最小手续费");
+													}
+
+												} else {
+
+													if (dfpag > settleFee) {
+														settleFee = dfpag;
+													}
+												}
+												switch (pmsBusinessPos.getBusinessnum()) {
+
+												case "1711030001":// 沈阳银盛
+													payAmount = dfactAmount.subtract(fee).subtract(new BigDecimal(100));
+													fee = fee.add(new BigDecimal(100));
+													break;
+												case "88882017092010001121":// 赢酷快捷
+													payAmount = dfactAmount.subtract(fee).subtract(new BigDecimal(20));
+													fee = fee.add(new BigDecimal(20));
+													break;
+												default:
+													/*
+													 * payAmount = dfactAmount.subtract(fee) .subtract(new
+													 * BigDecimal(settleFee).multiply(new BigDecimal(100))); fee =
+													 * fee.add(new BigDecimal(settleFee).multiply(new BigDecimal(100)));
+													 */
+													BigDecimal num = dfactAmount.multiply(new BigDecimal(userfee));
+													if (num.doubleValue() / 100 >= daifu) {
+														fee = num;
+													} else {
+														fee = new BigDecimal(daifu * 100);
+													}
+													rateStr = userfee.toString();
+													payAmount = dfactAmount.subtract(fee);
+													logger.info("清算金额:" + paymentAmount);
+													if (payAmount.doubleValue() < 0) {
+														payAmount = new BigDecimal(0.00);
+													}
+													break;
+
+												}
+												logger.info("清算金额:" + paymentAmount);
+												if (payAmount.doubleValue() < 0) {
+													payAmount = new BigDecimal(0.00);
+												}
+											}
+										}
+										// 设置结算金额
+										pmsAppTransInfo.setPayamount(payAmount.toString());// 结算金额
+										pmsAppTransInfo.setRate(rateStr);// 0.50_35 || 0.50
+										pmsAppTransInfo.setPoundage(fee.toString());
+										pmsAppTransInfo.setDrawMoneyType("1");// 普通提款
+										// 转换double为int
+										Integer paymentAmountInt = (int) Double.parseDouble(paymentAmount);
+
+										// 验证支付方式是否开启
+										payCheckResult = iPublicTradeVerifyService.totalVerify(paymentAmountInt,
+												TradeTypeEnum.merchantCollect, PaymentCodeEnum.moBaoQuickPay, oAgentNo,
+												merchantinfo.getMercId());
+										if (!payCheckResult.getErrCode().equals("0")) {
+											// 交易不支持
+
+											logger.info("不支持的支付方式，oAagentNo:" + oAgentNo + ",payType:"
+													+ PaymentCodeEnum.moBaoQuickPay.getTypeCode());
+											return setResp("13", "暂不支持该交易方式");
+										}
+										// 查看当前交易是否已经生成了流水表
+										PospTransInfo pospTransInfo = null;
+										// 流水表是否需要更新的标记 0 insert，1：update
+										int insertOrUpdateFlag = 0;
+										// 生成上送流水号
+										String transOrderId = generateTransOrderId(TradeTypeEnum.merchantCollect,
+												PaymentCodeEnum.moBaoQuickPay);
+										if ((pospTransInfo = pospTransInfoDAO
+												.searchByOrderId(pmsAppTransInfo.getOrderid())) != null) {
+											// 已经存在，修改流水号，设置pospsn为空
+											logger.info("订单号：" + pmsAppTransInfo.getOrderid() + ",生成上送通道的流水号："
+													+ transOrderId);
+											pospTransInfo.setTransOrderId(originalinfo.getV_oid());
+											pospTransInfo.setResponsecode("99");
+											pospTransInfo.setPospsn("");
+											insertOrUpdateFlag = 1;
+										} else {
+											// 不存在流水，生成一个流水
+											pospTransInfo = generateTransFromAppTrans(pmsAppTransInfo);
+
+											System.out.println("流水表生成的时间:" + pospTransInfo.getSenddate());
+											// 设置上送流水号
+											pospTransInfo.setTransOrderId(originalinfo.getV_oid());
+											insertOrUpdateFlag = 0;
+										}
+										// 插入流水表信息
+										if (insertOrUpdateFlag == 0) {
+											// 插入一条流水
+											pospTransInfoDAO.insert(pospTransInfo);
+										} else if (insertOrUpdateFlag == 1) {
+											// 更新一条流水
+											pospTransInfoDAO.updateByOrderId(pospTransInfo);
+										}
+										logger.info("修改订单信息");
+										logger.info(pmsAppTransInfo);
+										insertProfit(originalinfo.getV_oid(), originalinfo.getV_txnAmt(), merchantinfo,
+												PaymentCodeEnum.moBaoQuickPay.getTypeName(), originalinfo.getV_type());
+										int num = pmsAppTransInfoDao.update(pmsAppTransInfo);
+										if (num > 0) {
+
+											logger.info("上游通道商户号:" + pmsBusinessPos.getChannelnum());
+											// 商户号码
+											String merId = pmsBusinessPos.getBusinessnum();// 818310048160000
+											// 商户号私钥
+											String merKey = pmsBusinessPos.getKek();
+											PayBankInfo bank = new PayBankInfo();
+											bank.setBank_pmsbankNo(originalinfo.getV_settlePmsBankNo());
+											bank = payBankInfoDao.selectByBankInfo(bank);
+											logger.info("查询结算商户银行信息:" + bank);
+											PayBankInfo bank2 = new PayBankInfo();
+											bank2.setBank_pmsbankNo(originalinfo.getV_pmsBankNo());
+											bank2 = payBankInfoDao.selectByBankInfo(bank2);
+											logger.info("查询交易商户银行信息:" + bank2);
+											int number = 0;
+											String url = "";
+											String sign = "";
+											JSONObject json;
+											Calendar now = Calendar.getInstance();
+											String minute = "";
+											String month = "";
+											SmsBalanceRequest smsBalanceRequest;
+											SmsBalanceResponse smsVarableResponse;
+											switch (pmsBusinessPos.getChannelnum()) {
+											/*
+											 * case "936640995770001": // 摩宝快捷收银台 case "936640995770002": // 摩宝快捷银联界面
+											 * case "88882017092010001121": // 赢酷快捷 case "000000003":// 易生快捷 case
+											 * "1120180427134034001":// 银生宝快捷
+											 */
+
+											case "MBXHF":
+											case "YK":
+											case "YSKJ":
+											case "YSB":
+												if ("936640995770000".equals(pmsBusinessPos.getBusinessnum())) {
+													Map<String, String> transmap = new LinkedHashMap<String, String>();
+													transmap.put("versionId", "001"); // 版本号 固定
+													transmap.put("businessType", "1401"); // 预交易 1401
+													transmap.put("merId", "936640995770000"); // 商户号
+													transmap.put("orderId", originalinfo.getV_oid()); // 订单号
+													transmap.put("transDate", originalinfo.getV_time()); // 时间
+																											// yymmddhhmmss
+													transmap.put("transAmount", originalinfo.getV_txnAmt()); // 金额
+																												// 单位元，对于正式商户最低支付金额为10元
+													transmap.put("cardByName", MD5Util
+															.encode(originalinfo.getV_realName().getBytes("UTF-8"))); // 此处的MD5util为Base64加密
+													transmap.put("cardByNo", originalinfo.getV_cardNo()); // 卡号
+													if ("1".equals(originalinfo.getV_accountType())) {
+														transmap.put("cardType", "01"); // 卡类型01借记卡
+
+													} else if ("2".equals(originalinfo.getV_accountType())) {
+
+														transmap.put("cardType", "00"); // 卡类型00贷记卡
+														transmap.put("expireDate", originalinfo.getV_expired()); // 有效期
+														transmap.put("CVV", originalinfo.getV_cvn2()); // CVN
+													}
+													// transmap.put("bankCode",mbReqest.getBankCode()); //可为空 银行代码
+													// transmap.put("openBankName",mbReqest.getOpenBankName());//可为空
+													// 银行代码
+													transmap.put("cerType", "01"); // 证件类型 01 身份证
+													transmap.put("cerNumber", originalinfo.getV_cert_no());// 身份证
+													transmap.put("mobile", originalinfo.getV_phone()); // 手机号
+													transmap.put("isAcceptYzm", "00"); // 默认00
+													transmap.put("backNotifyUrl", MBUtil.notifyUrl);
+													transmap.put("instalTransFlag", "01"); // 分期标志
+													// 需要加密的字符串
+													String signstr = EncodeUtil.getUrlStr(transmap);
+													logger.info("需要签名的明文" + signstr);
+													String signtrue = MD5Util.MD5Encode(signstr + merKey);
+													transmap.put("signType", "MD5");
+													transmap.put("signData", signtrue);
+													// AES加密
+													String transUrlStr = EncodeUtil.getUrlStr(transmap);
+													//
+													String transData = AESUtil.encrypt(transUrlStr, merKey);
+													// 生产地址
+													String testUrl = MBUtil.quick;
+													String str = DemoBase.requestBody(merId, transData, testUrl);
+													// 获取交易返回结果
+													logger.info(str);
+													ObjectMapper om = new ObjectMapper();
+													Map<String, String> maps = new HashMap<>();
+													maps = om.readValue(str, Map.class);
+													retMap.put("v_mid", originalinfo.getV_mid());
+													retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+													retMap.put("v_time", originalinfo.getV_time());
+													retMap.put("v_oid", originalinfo.getV_oid());
+													if ("00".equals(maps.get("status"))) {
+														if ("01".equals(maps.get("refCode"))) {
+															OriginalOrderInfo info = new OriginalOrderInfo();
+															info.setMerchantOrderId(maps.get("ksPayOrderId"));
+															info.setOrderId(originalinfo.getV_oid());
+															number = originalDao.update(info);
+															retMap.put("v_code", "00");
+															retMap.put("v_msg", "请求成功");
+														} else if ("02".equals(maps.get("refCode"))) {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+														} else {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+														}
+													} else if ("01".equals(maps.get("status"))) {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													} else if ("02".equals(maps.get("status"))) {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													}
+												} else if ("000000001".equals(pmsBusinessPos.getBusinessnum())) {
+													String channelKey = YSUtil.channelKey;
+													String channel_sign_method = "SHA256";
+													Map<String, Object> reqMap = new TreeMap<String, Object>();
+													reqMap.put("sp_id", YSUtil.sp_id);// 服务商号
+													reqMap.put("mch_id", YSUtil.merId2);// 商户号
+													reqMap.put("out_trade_no", originalinfo.getV_oid());
+													reqMap.put("id_type", "01");
+													reqMap.put("acc_name", originalinfo.getV_realName());// 持卡人姓名
+													reqMap.put("acc_type", "PERSONNEL");// PERSONNEL：对私 CORPORATE：对公
+													reqMap.put("in_acc_no", originalinfo.getV_settleCardNo());// 卡号
+													reqMap.put("mobile", originalinfo.getV_phone());// 手机号
+													reqMap.put("id_no", originalinfo.getV_cert_no());// 证件号
+													reqMap.put("settle_rate", originalinfo.getV_settleUserFee());// 结算费率
+													reqMap.put("extra_rate", originalinfo.getV_userFee());// T0费率
+													Date t = new Date();
+													java.util.Calendar cal = java.util.Calendar.getInstance();
+													cal.setTime(t);
+													long sys_timestamp = cal.getTimeInMillis();
+													reqMap.put("timestamp", sys_timestamp);// 时间戳
+
+													StringBuilder sb = new StringBuilder();
+													Set<String> keySet = reqMap.keySet();
+													Iterator<String> iter = keySet.iterator();
+													while (iter.hasNext()) {
+														String key = iter.next();
+														sb.append(key);
+														sb.append("=");
+														sb.append(reqMap.get(key));
+														sb.append("&");
+													}
+													sign = SwpHashUtil.getSign(sb.toString() + "key=" + channelKey,
+															channelKey, channel_sign_method);
+													reqMap.put("sign", sign);
+
+													sb.append("sign");
+													sb.append("=");
+													sb.append(sign);
+													System.out.println(sb.toString());
+													url = YSUtil.url + "/swp/up/settlecheck.do";
+													HttpResponse httpResponse = HttpUtils.doPost(url, "", sb.toString(),
+															"application/x-www-form-urlencoded; charset=UTF-8");
+													String resp = EntityUtils.toString(httpResponse.getEntity());
+													System.out.println("接受请求:" + resp);
+													json = JSONObject.parseObject(resp);
+
+													if ("SUCCESS".equals(json.getString("status"))) {
+														if ("SUCCESS".equals(json.getString("trade_state"))) {
+															PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
+															merchartInfo.setAccount(json.getString("sub_mch_id"));// 账号
+															merchartInfo.setMerchartId(originalinfo.getV_mid());
+															merchartInfo
+																	.setMerchartName(merchantList.get(0).getMercName());
+															merchartInfo.setMerchartNameSort(
+																	merchantList.get(0).getShortname());
+															merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
+															merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
+															merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
+															merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
+															// merchartInfo.setAccountType(payRequest.getBusinessType());//账户类型
+															merchartInfo.setBankName(bank2.getBank_name());// 开户行
+															merchartInfo.setPmsBankNo(originalinfo.getV_pmsBankNo());// 联行号
+															merchartInfo.setProvince(bank2.getBank_province());// 省份
+															merchartInfo.setCity(bank2.getBank_city());// 城市
+															merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
+															// merchartInfo.setWithdrawDepositSingleFee(payRequest.getWithdrawDepositSingleFee());//提现单笔手续费
+															merchartInfo.setoAgentNo("100333");
+															merchartInfo.setRateCode(originalinfo.getV_mid());
+															int i = weixinService.updateRegister(merchartInfo);
+															logger.info("易生修改状态:" + i);
+															if (i > 0) {
+																channelKey = YSUtil.channelKey;
+																channel_sign_method = "SHA256";
+																reqMap.put("sp_id", YSUtil.sp_id);// 服务商号
+																reqMap.put("mch_id", YSUtil.merId2);// 商户号
+																reqMap.put("out_trade_no", originalinfo.getV_oid());
+																reqMap.put("id_type", "01");
+																reqMap.put("sub_mch_id", json.getString("sub_mch_id"));
+																reqMap.put("acc_name", originalinfo.getV_realName());// 持卡人姓名
+																reqMap.put("cvn2", originalinfo.getV_cvn2());//
+																reqMap.put("expired", originalinfo.getV_expired());
+																reqMap.put("acc_no", originalinfo.getV_cardNo());// 卡号
+																reqMap.put("bankcode", bank2.getBank_code());// 银行代码
+																reqMap.put("mobile", originalinfo.getV_phone());// 手机号
+																reqMap.put("id_no", originalinfo.getV_cert_no());// 证件号
+																t = new Date();
+																cal = java.util.Calendar.getInstance();
+																cal.setTime(t);
+																sys_timestamp = cal.getTimeInMillis();
+																reqMap.put("timestamp", sys_timestamp);// 时间戳
+
+																sb = new StringBuilder();
+																keySet = reqMap.keySet();
+																iter = keySet.iterator();
+																while (iter.hasNext()) {
+																	String key = iter.next();
+																	sb.append(key);
+																	sb.append("=");
+																	sb.append(reqMap.get(key));
+																	sb.append("&");
+																}
+																sign = SwpHashUtil.getSign(
+																		sb.toString() + "key=" + channelKey, channelKey,
+																		channel_sign_method);
+																reqMap.put("sign", sign);
+
+																sb.append("sign");
+																sb.append("=");
+																sb.append(sign);
+																System.out.println(sb.toString());
+																url = YSUtil.url + "/swp/up/bindCardBack.do";
+																httpResponse = HttpUtils.doPost(url, "", sb.toString(),
+																		"application/x-www-form-urlencoded; charset=UTF-8");
+																resp = EntityUtils.toString(httpResponse.getEntity());
+																System.out.println("接受请求:" + resp);
+																json = JSONObject.parseObject(resp);
+
+																if ("SUCCESS".equals(json.getString("status"))) {
+																	if ("SUCCESS"
+																			.equals(json.getString("trade_state"))) {
+																		PmsDaifuMerchantInfo model = new PmsDaifuMerchantInfo();
+																		model.setMercId(originalinfo.getV_mid());
+																		model.setBatchNo(originalinfo.getV_oid());
+																		model.setIdentity(json.getString("swpaccid"));
+																		model.setCardno(originalinfo.getV_cardNo());
+																		model.setRealname(originalinfo.getV_realName());
+																		model.setPmsbankno(
+																				json.getString("trade_state_desc"));
+																		model.setTransactionType("快捷绑卡");
+																		model.setOagentno("100333");
+																		model.setResponsecode("00");
+																		i = pmsDaifuMerchantInfoDao.insert(model);
+																		if (i > 0) {
+																			logger.info("插入鉴权订单成功！！");
+																			channelKey = YSUtil.channelKey;
+																			channel_sign_method = "SHA256";
+																			Map<String, Object> reqMap1 = new TreeMap<String, Object>();
+																			reqMap1.put("sp_id", YSUtil.sp_id);
+																			reqMap1.put("mch_id",
+																					pmsBusinessPos.getBusinessnum());// 商户号YSUtil.merId1
+																			reqMap1.put("out_trade_no",
+																					originalinfo.getV_oid());
+																			reqMap1.put("swpaccid",
+																					json.getString("swpaccid"));
+																			Double amount = Double.parseDouble(
+																					originalinfo.getV_txnAmt()) * 100;
+																			reqMap1.put("total_fee", amount.toString());
+																			t = new Date();
+																			cal = java.util.Calendar.getInstance();
+																			cal.setTime(t);
+																			sys_timestamp = cal.getTimeInMillis();
+																			reqMap1.put("timestamp", sys_timestamp);
+
+																			StringBuilder sb1 = new StringBuilder();
+																			keySet = reqMap.keySet();
+																			iter = keySet.iterator();
+																			while (iter.hasNext()) {
+																				String key = iter.next();
+																				sb1.append(key);
+																				sb1.append("=");
+																				sb1.append(reqMap.get(key));
+																				sb1.append("&");
+																			}
+																			sign = SwpHashUtil.getSign(
+																					sb1.toString() + "key="
+																							+ channelKey,
+																					channelKey, channel_sign_method);
+																			reqMap1.put("sign", sign);
+
+																			sb1.append("sign");
+																			sb1.append("=");
+																			sb1.append(sign);
+																			logger.info("签名串:" + sb1.toString());
+																			url = YSUtil.url + "/swp/up/sms.do";
+																			httpResponse = HttpUtils.doPost(url, "",
+																					sb.toString(),
+																					"application/x-www-form-urlencoded; charset=UTF-8");
+																			resp = EntityUtils
+																					.toString(httpResponse.getEntity());
+																			logger.info("接受请求:" + resp);
+																			json = JSONObject.parseObject(resp);
+																			if ("SUCCESS"
+																					.equals(json.getString("status"))) {
+																				if ("SUCCESS".equals(json
+																						.getString("trade_state"))) {
+																					OriginalOrderInfo info = new OriginalOrderInfo();
+																					info.setOrderId(
+																							originalinfo.getV_oid());
+																					info.setMerchantOrderId(json
+																							.getString("sys_trade_no"));
+																					;
+																					number = originalDao.update(info);
+																					if (number > 0) {
+																						retMap.put("v_mid", originalinfo
+																								.getV_mid());
+																						retMap.put("v_txnAmt",
+																								originalinfo
+																										.getV_txnAmt());
+																						retMap.put("v_time",
+																								originalinfo
+																										.getV_time());
+																						retMap.put("v_code", "00");
+																						retMap.put("v_msg", "请求成功");
+																						retMap.put("v_oid", originalinfo
+																								.getV_oid());
+																					}
+
+																				} else {
+																					retMap.put("v_code", "15");
+																					retMap.put("v_msg", "请求失败");
+																					return retMap;
+																				}
+																			} else {
+																				retMap.put("v_code", "15");
+																				retMap.put("v_msg", "请求失败");
+																				return retMap;
+																			}
+																		}
+																	} else {
+																		retMap.put("v_code", "15");
+																		retMap.put("v_msg", "请求失败");
+																		return retMap;
+																	}
+																} else {
+																	retMap.put("v_code", "15");
+																	retMap.put("v_msg", "请求失败");
+																	return retMap;
+																}
+
+															}
+														} else {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+															return retMap;
+														}
+													} else {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+														return retMap;
+													}
+												} else {
+													number = now.get(Calendar.MONTH) + 1;
+													if (number < 10) {
+														month = "0" + number;
+													}
+													if (now.get(Calendar.MINUTE) < 10) {
+														minute = "0" + now.get(Calendar.MINUTE);
+													}
+													String time = now.get(Calendar.YEAR) + "年" + month + "月"
+															+ now.get(Calendar.DAY_OF_MONTH) + "日"
+															+ now.get(Calendar.HOUR_OF_DAY) + ":" + minute;
+
+													merchantinfo = merchantList.get(0);
+													String phone = originalinfo.getV_phone();// 法人手机号
+
+													// 查询余额
+													smsBalanceRequest = new SmsBalanceRequest(ACCOUNT, PSWD);
+
+													String balancerequestJson = JSON.toJSONString(smsBalanceRequest);
+
+													logger.info("查询短信余额前上送的数据:" + balancerequestJson);
+
+													String balanceresponse = ChuangLanSmsUtil
+															.sendSmsByPost(smsBalanceRequestUrl, balancerequestJson);
+
+													logger.info("查询短信余额响应信息 : " + balanceresponse);
+
+													smsVarableResponse = JSON.parseObject(balanceresponse,
+															SmsBalanceResponse.class);
+
+													logger.info("查询余额实体信息 : " + smsVarableResponse);
+
+													if ("0".equals(smsVarableResponse.getCode())) {
+														logger.info("剩余可用余额条数:" + smsVarableResponse.getBalance());
+
+														if (Integer.parseInt(smsVarableResponse.getBalance()) > 0) {
+
+															Integer num1 = (int) ((Math.random() * 9 + 1) * 100000);
+
+															logger.info("上送的验证码：" + num1);
+
+															// 验证码实现
+
+															String params = originalinfo.getV_phone() + ","
+																	+ num1.toString() + "," + time;
+
+															String massage = MSG + num1.toString();
+															SmsVariableRequest smsVariableRequest = new SmsVariableRequest(
+																	ACCOUNT, PSWD, MSG, params, REPORT);
+															SmsSendRequest smsSingleRequest = new SmsSendRequest(
+																	ACCOUNT, PSWD, massage, phone, REPORT);
+
+															String varrequestJson = JSON
+																	.toJSONString(smsVariableRequest);
+
+															logger.info("普通短信请求前数据:" + varrequestJson);
+															String smsresponse = ChuangLanSmsUtil.sendSmsByPost(
+																	smsVariableRequestUrl, varrequestJson);
+
+															logger.info("普通短信响应数据:" + smsresponse);
+															SmsSendResponse smsSingleResponse = JSON
+																	.parseObject(smsresponse, SmsSendResponse.class);
+															SmsVariableResponse smsVariableResponse = JSON.parseObject(
+																	smsresponse, SmsVariableResponse.class);
+															if ("0".equals(smsVariableResponse.getCode())) {
+																OriginalOrderInfo info = new OriginalOrderInfo();
+																info.setOrderId(originalinfo.getV_oid());
+																info.setSumCode(num1.toString());
+																number = originalDao.update(info);
+																if (number > 0) {
+																	retMap.put("v_mid", originalinfo.getV_mid());
+																	retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																	retMap.put("v_time", originalinfo.getV_time());
+																	retMap.put("v_code", "00");
+																	retMap.put("v_msg", "请求成功");
+																	retMap.put("v_oid", originalinfo.getV_oid());
+																}
+															}
+														} else {
+
+															logger.info("余额不足，请充值" + smsVarableResponse.getCode());
+															// retMap.put("002", "余额不足,请充值");
+														}
+
+													} else {
+
+														logger.info("信息有误，请充重新提交" + smsVarableResponse.getCode());
+														return setResp("07", "系统异常，请重试或联系客服");
+													}
+												}
+
+												break;
+											case "YBLS":// 易宝快捷
+												if ("1".equals(originalinfo.getV_type())) {
+													now = Calendar.getInstance();
+													number = now.get(Calendar.MONTH) + 1;
+													minute = "";
+													month = "";
+													if (number < 10) {
+														month = "0" + number;
+													}
+													if (now.get(Calendar.MINUTE) < 10) {
+														minute = "0" + now.get(Calendar.MINUTE);
+													}
+													String time = now.get(Calendar.YEAR) + "年" + month + "月"
+															+ now.get(Calendar.DAY_OF_MONTH) + "日"
+															+ now.get(Calendar.HOUR_OF_DAY) + ":" + minute;
+
+													merchantinfo = merchantList.get(0);
+													String phone = originalinfo.getV_phone();// 法人手机号
+
+													// 查询余额
+													smsBalanceRequest = new SmsBalanceRequest(ACCOUNT, PSWD);
+
+													String balancerequestJson = JSON.toJSONString(smsBalanceRequest);
+
+													logger.info("查询短信余额前上送的数据:" + balancerequestJson);
+
+													String balanceresponse = ChuangLanSmsUtil
+															.sendSmsByPost(smsBalanceRequestUrl, balancerequestJson);
+
+													logger.info("查询短信余额响应信息 : " + balanceresponse);
+
+													smsVarableResponse = JSON.parseObject(balanceresponse,
+															SmsBalanceResponse.class);
+
+													logger.info("查询余额实体信息 : " + smsVarableResponse);
+
+													if ("0".equals(smsVarableResponse.getCode())) {
+														logger.info("剩余可用余额条数:" + smsVarableResponse.getBalance());
+
+														if (Integer.parseInt(smsVarableResponse.getBalance()) > 0) {
+
+															Integer num1 = (int) ((Math.random() * 9 + 1) * 100000);
+
+															logger.info("上送的验证码：" + num1);
+
+															// 验证码实现
+
+															String params = originalinfo.getV_phone() + ","
+																	+ num1.toString() + "," + time;
+
+															String massage = MSG + num1.toString();
+															SmsVariableRequest smsVariableRequest = new SmsVariableRequest(
+																	ACCOUNT, PSWD, MSG, params, REPORT);
+															SmsSendRequest smsSingleRequest = new SmsSendRequest(
+																	ACCOUNT, PSWD, massage, phone, REPORT);
+
+															String varrequestJson = JSON
+																	.toJSONString(smsVariableRequest);
+
+															logger.info("普通短信请求前数据:" + varrequestJson);
+															String smsresponse = ChuangLanSmsUtil.sendSmsByPost(
+																	smsVariableRequestUrl, varrequestJson);
+
+															logger.info("普通短信响应数据:" + smsresponse);
+															SmsSendResponse smsSingleResponse = JSON
+																	.parseObject(smsresponse, SmsSendResponse.class);
+															SmsVariableResponse smsVariableResponse = JSON.parseObject(
+																	smsresponse, SmsVariableResponse.class);
+															if ("0".equals(smsVariableResponse.getCode())) {
+																OriginalOrderInfo info = new OriginalOrderInfo();
+																info.setOrderId(originalinfo.getV_oid());
+																info.setSumCode(num1.toString());
+																number = originalDao.update(info);
+																if (number > 0) {
+																	retMap.put("v_mid", originalinfo.getV_mid());
+																	retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																	retMap.put("v_time", originalinfo.getV_time());
+																	retMap.put("v_code", "00");
+																	retMap.put("v_msg", "请求成功");
+																	retMap.put("v_oid", originalinfo.getV_oid());
+																}
+															}
+														} else {
+
+															logger.info("余额不足，请充值" + smsVarableResponse.getCode());
+															// retMap.put("002", "余额不足,请充值");
+														}
+
+													} else {
+
+														logger.info("信息有误，请充重新提交" + smsVarableResponse.getCode());
+														return setResp("07", "系统异常，请重试或联系客服");
+													}
+												}
+												break;
+											case "MBYLM":// 摩宝快捷
+
+												Map<String, String> transmap = new LinkedHashMap<String, String>();
+												transmap.put("versionId", "001"); // 版本号 固定
+												transmap.put("businessType", "1401"); // 预交易 1401
+												transmap.put("merId", "936640995770000"); // 商户号
+												transmap.put("orderId", originalinfo.getV_oid()); // 订单号
+												transmap.put("transDate", originalinfo.getV_time()); // 时间 yymmddhhmmss
+												transmap.put("transAmount", originalinfo.getV_txnAmt()); // 金额
+																											// 单位元，对于正式商户最低支付金额为10元
+												transmap.put("cardByName",
+														MD5Util.encode(originalinfo.getV_realName().getBytes("UTF-8"))); // 此处的MD5util为Base64加密
+												transmap.put("cardByNo", originalinfo.getV_cardNo()); // 卡号
+												if ("1".equals(originalinfo.getV_accountType())) {
+													transmap.put("cardType", "01"); // 卡类型01借记卡
+
+												} else if ("2".equals(originalinfo.getV_accountType())) {
+
+													transmap.put("cardType", "00"); // 卡类型00贷记卡
+													transmap.put("expireDate", originalinfo.getV_expired()); // 有效期
+													transmap.put("CVV", originalinfo.getV_cvn2()); // CVN
+												}
+												// transmap.put("bankCode",mbReqest.getBankCode()); //可为空 银行代码
+												// transmap.put("openBankName",mbReqest.getOpenBankName());//可为空 银行代码
+												transmap.put("cerType", "01"); // 证件类型 01 身份证
+												transmap.put("cerNumber", originalinfo.getV_cert_no());// 身份证
+												transmap.put("mobile", originalinfo.getV_phone()); // 手机号
+												transmap.put("isAcceptYzm", "00"); // 默认00
+												transmap.put("backNotifyUrl", MBUtil.notifyUrl);
+												transmap.put("instalTransFlag", "01"); // 分期标志
+												// 需要加密的字符串
+												String signstr = EncodeUtil.getUrlStr(transmap);
+												logger.info("需要签名的明文" + signstr);
+												String signtrue = MD5Util.MD5Encode(signstr + merKey);
+												transmap.put("signType", "MD5");
+												transmap.put("signData", signtrue);
+												// AES加密
+												String transUrlStr = EncodeUtil.getUrlStr(transmap);
+												//
+												String transData = AESUtil.encrypt(transUrlStr, merKey);
+												// 生产地址
+												String testUrl = MBUtil.quick;
+												String str = DemoBase.requestBody(merId, transData, testUrl);
+												// 获取交易返回结果
+												logger.info(str);
+												ObjectMapper om = new ObjectMapper();
+												Map<String, String> maps = new HashMap<>();
+												maps = om.readValue(str, Map.class);
+												retMap.put("v_mid", originalinfo.getV_mid());
+												retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+												retMap.put("v_time", originalinfo.getV_time());
+												retMap.put("v_oid", originalinfo.getV_oid());
+												if ("00".equals(maps.get("status"))) {
+													if ("01".equals(maps.get("refCode"))) {
+														OriginalOrderInfo info = new OriginalOrderInfo();
+														info.setMerchantOrderId(maps.get("ksPayOrderId"));
+														info.setOrderId(originalinfo.getV_oid());
+														number = originalDao.update(info);
+														retMap.put("v_code", "00");
+														retMap.put("v_msg", "请求成功");
+													} else if ("02".equals(maps.get("refCode"))) {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													} else {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													}
+												} else if ("01".equals(maps.get("status"))) {
+													retMap.put("v_code", "15");
+													retMap.put("v_msg", "请求失败");
+												} else if ("02".equals(maps.get("status"))) {
+													retMap.put("v_code", "15");
+													retMap.put("v_msg", "请求失败");
+												}
+												break;
+											case "HLB":// 合利宝快捷
+												LinkedHashMap<String, String> map = new LinkedHashMap<>();
+												try {
+													map.put("P1_bizType", "QuickPayBankCardPay");
+													map.put("P2_customerNumber", "C" + pmsBusinessPos.getBusinessnum());
+													map.put("P3_userId", originalinfo.getV_oid());// 170000000002
+													map.put("P4_orderId", originalinfo.getV_oid());
+													map.put("P5_timestamp", originalinfo.getV_time());
+													map.put("P6_payerName", originalinfo.getV_realName());// URLEncoder.encode("安晓楠","UTF-8")
+													map.put("P7_idCardType", "IDCARD");
+													map.put("P8_idCardNo", originalinfo.getV_cert_no());// URLEncoder.encode("130722198710107446","UTF-8")
+													map.put("P9_cardNo", originalinfo.getV_cardNo());// URLEncoder.encode("5268550479591851","UTF-8")
+													// map.put("P10_year",
+													// hlbRequest.getYear()==null?"":hlbRequest.getYear());//URLEncoder.encode("20","UTF-8")
+													// map.put("P11_month",hlbRequest.getMonth()==null?"":hlbRequest.getMonth());//URLEncoder.encode("07","UTF-8");
+													map.put("P12_cvv2", originalinfo.getV_cvn2() == null ? ""
+															: originalinfo.getV_cvn2());// URLEncoder.encode("862","UTF-8")
+													map.put("P13_phone", originalinfo.getV_phone());// URLEncoder.encode("15652000669","UTF-8")
+													map.put("P14_currency", "CNY");
+													map.put("P15_orderAmount",
+															Double.parseDouble(originalinfo.getV_txnAmt()) + "");
+													map.put("P16_goodsName", originalinfo.getV_productDesc());
+													map.put("P17_goodsDesc", originalinfo.getV_productDesc());
+													map.put("P18_terminalType", "IMEI");
+													map.put("P19_terminalId", originalinfo.getV_oid());
+													map.put("P20_orderIp", "127.0.0.1");
+													// map.put("P21_period",
+													// hlbRequest.getPeriod()==null?"1":hlbRequest.getPeriod());
+													// map.put("P22_periodUnit",
+													// hlbRequest.getPeriodUnit()==null?"Day":hlbRequest.getPeriodUnit());
+													map.put("P23_serverCallbackUrl", HLBUtil.notifyUrl);
+													logger.info("签名之前的数据:" + map);
+													String key = pmsBusinessPos.getKek();
+													String oriMessage = MyBeanUtils.getSigned(map, null, key);
+													logger.info("签名原文串：" + oriMessage);
+													sign = Disguiser.disguiseMD5(oriMessage, "UTF-8");
+													map.put("sign", sign);
+													Map<String, Object> resultMap1 = HttpClientService.getHttpResp(map,
+															HLBUtil.url);
+													String s = resultMap1.get("response").toString();
+													System.out.println(s);
+													json = JSONObject.parseObject(s);
+													if ("0000".equals(json.getString("rt2_retCode"))) {
+														map.put("P1_bizType", "QuickPaySendValidateCode");
+														map.put("P2_customerNumber",
+																"C" + pmsBusinessPos.getBusinessnum());
+														map.put("P3_orderId", originalinfo.getV_oid());
+														map.put("P4_timestamp", originalinfo.getV_time());
+														map.put("P5_phone", originalinfo.getV_phone());
+														logger.info("签名之前的数据:" + map);
+														// String key=pmsBusinessPos.getKek();
+														oriMessage = MyBeanUtils.getSigned(map, null, key);
+														logger.info("签名原文串：" + oriMessage);
+														sign = Disguiser.disguiseMD5(oriMessage, "UTF-8");
+														map.put("sign", sign);
+														Map<String, Object> resultMap2 = HttpClientService
+																.getHttpResp(map, HLBUtil.url);
+														logger.info("获取短信验证码返回参数:" + JSON.toJSONString(resultMap));
+														s = resultMap2.get("response").toString();
+														System.out.println(s);
+														json = JSONObject.parseObject(s);
+														if ("0000".equals(json.getString("rt2_retCode"))) {
+															retMap.put("respCode", "00");
+															retMap.put("type", originalinfo.getV_type());
+															retMap.put("merNo", originalinfo.getV_mid());
+															retMap.put("phone", json.getString("rt6_phone"));
+															retMap.put("respMsg", json.getString("rt3_retMsg"));
+															retMap.put("orderId", json.getString("rt5_orderId"));
+
+														} else {
+															retMap.put("respCode", "15");
+															retMap.put("type", originalinfo.getV_type());
+															retMap.put("merNo", originalinfo.getV_mid());
+															retMap.put("phone", json.getString("rt6_phone"));
+															retMap.put("respMsg", json.getString("rt3_retMsg"));
+															retMap.put("orderId", json.getString("rt5_orderId"));
+														}
+
+													} else {
+														retMap.put("respCode", "01");
+														retMap.put("type", originalinfo.getV_type());
+														retMap.put("merNo", originalinfo.getV_mid());
+														retMap.put("userId", originalinfo.getV_oid());
+														retMap.put("respMsg", json.getString("rt3_retMsg"));
+														retMap.put("orderId", json.getString("rt5_orderId"));
+													}
+													logger.info("下单返回参数:" + JSON.toJSONString(resultMap));
+
+												} catch (Exception e) {
+													logger.info("下单" + e);
+												}
+												break;
+											case "GZHM":// 广州恒明有积分快捷
+												JSONObject requestObj = new JSONObject();
+												requestObj.put("ordernumber", originalinfo.getV_oid());
+												requestObj.put("merchantid", "M" + pmsBusinessPos.getBusinessnum());
+												requestObj.put("username", originalinfo.getV_realName());
+												requestObj.put("userpid", originalinfo.getV_pmsBankNo());
+												requestObj.put("usercardno", originalinfo.getV_cardNo());
+												requestObj.put("usertel", originalinfo.getV_phone());
+												requestObj.put("amount", originalinfo.getV_txnAmt());// 单位分 100=1元
+												if ("0".equals(originalinfo.getV_type())) {
+													requestObj.put("ordertype", "10");// 10:D0,11:T1
+
+												} else if ("1".equals(originalinfo.getV_type())) {
+													requestObj.put("ordertype", "11");// 10:D0,11:T1
+												}
+												requestObj.put("cvn2", originalinfo.getV_cvn2() == null ? ""
+														: originalinfo.getV_cvn2());
+												requestObj.put("expdate", originalinfo.getV_expired() == null ? ""
+														: originalinfo.getV_expired());
+												requestObj.put("usertel", originalinfo.getV_phone());
+												requestObj.put("backurl", HMUtil.quickUrl);
+												requestObj.put("returnurl", "");
+												String encryptdata = AesEncryption.Encrypt(requestObj.toJSONString(),
+														HMUtil.aeskey, HMUtil.aeskey);
+
+												String timestamp = TimeUtil.getTime();
+												signstr = SHA256Util.sha256(
+														pmsBusinessPos.getKek() + "M" + pmsBusinessPos.getBusinessnum()
+																+ encryptdata + timestamp + pmsBusinessPos.getKek());
+												System.out.println(signstr);
+												JSONObject jsonObject = new JSONObject();
+												jsonObject.put("merchantid", "M" + pmsBusinessPos.getBusinessnum());
+												jsonObject.put("data", encryptdata);
+												jsonObject.put("timestamp", timestamp);
+												jsonObject.put("sign", signstr);
+												String postdata = "merchantid=" + "M" + pmsBusinessPos.getBusinessnum()
+														+ "&data=" + encryptdata + "&timestamp=" + timestamp + "&sign="
+														+ signstr;
+												String openApiUrl = "";
+												if (!"".equals(originalinfo.getV_cvn2())) {
+													openApiUrl = HMUtil.quickPayXinUrl;
+												} else {
+													openApiUrl = HMUtil.quickPayJieUrl;
+												}
+												String results = HttpsUtil.doSslPost(openApiUrl, postdata, "utf-8");
+												logger.info("恒明返回参数：" + results);
+
+												JSONObject responseObj = JSONObject.parseObject(results);
+												logger.info("message:" + responseObj.get("message"));
+												retMap.put("v_mid", originalinfo.getV_mid());
+												retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+												retMap.put("v_time", originalinfo.getV_time());
+												retMap.put("v_oid", originalinfo.getV_oid());
+												if ("0".equals(responseObj.get("ret").toString())) {
+													String dedata = AesEncryption.Desencrypt(
+															responseObj.get("data").toString(), HMUtil.aeskey,
+															HMUtil.aeskey);
+													logger.info("恒明解析参数：" + dedata);
+													JSONObject jsonObject2 = JSONObject.parseObject(dedata);
+													// PmsAppTransInfo pmsAppTransInfo =
+													// pmsAppTransInfoDao.searchOrderInfo(pospTransInfo.getOrderId());
+													if ("0".equals(jsonObject2.get("orderstate"))) {
+														OriginalOrderInfo info = new OriginalOrderInfo();
+														info.setMerchantOrderId(jsonObject2.getString("payorderno"));
+														info.setOrderId(originalinfo.getV_oid());
+														number = originalDao.update(info);
+														retMap.put("v_code", "00");
+														retMap.put("v_msg", "请求成功");
+
+													} else {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+														return retMap;
+
+													}
+												} else {
+													retMap.put("v_code", "15");
+													retMap.put("v_msg", "请求失败");
+													return retMap;
+												}
+												break;
+
+											case "SYYS":// 沈阳银盛
+												PmsWeixinMerchartInfo weixin = new PmsWeixinMerchartInfo();
+
+												weixin.setCardNo(originalinfo.getV_settleCardNo());
+												weixin.setRealName(originalinfo.getV_settleName());
+												weixin.setCertNo(originalinfo.getV_cert_no());
+												weixin.setMobile(originalinfo.getV_phone());
+
+												PmsWeixinMerchartInfo model = weixinService.selectByCardEntity(weixin);
+
+												logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(model));
+
+												if (model == null) {
+													Map<String, String> requestMap = new HashMap<String, String>();
+													requestMap.put("merchId", "m1803070001"); // 商户全称，企业商户填写营业执照名称
+													requestMap.put("merchantName", originalinfo.getV_productDesc()); // 商户全称，企业商户填写营业执照名称
+													requestMap.put("channel", "WLB");
+													requestMap.put("installProvince", bank.getBank_province());
+													requestMap.put("installCity", bank.getBank_city());
+													requestMap.put("installCounty", bank.getBank_city());
+													requestMap.put("operateAddress", bank.getBank_city());
+													requestMap.put("legalPersonName", originalinfo.getV_settleName()); // 法人姓名，如果bankType为TOPRIVATE，则结算账户与法人必须一致,
+													// 如果bankType为TOPUBLIC，结算账户名和商户名称是一致的
+													requestMap.put("legalPersonID", originalinfo.getV_cert_no()); // 法人身份证
+													requestMap.put("merchantPersonPhone", originalinfo.getV_phone());// 商户联系人电话
+													// 如果bankType为TOPRIVATE，则legalPersonName与accountName必须一致
+													requestMap.put("accountNo", originalinfo.getV_settleCardNo());
+													requestMap.put("bankBranch", bank.getBank_name());
+													requestMap.put("bankProv", bank.getBank_province());
+													requestMap.put("bankCity", bank.getBank_city());
+													requestMap.put("bankCode", originalinfo.getV_settlePmsBankNo());
+													requestMap.put("bankName", bank.getBank_short_title());
+													requestMap.put("fastRate", originalinfo.getV_userFee());
+													String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+													// 得到带签名数据
+													Map<String, ?> filterMap = PayCore.paraFilter(requestMap);
+
+													String linkStr = PayCore.createLinkString(filterMap);
+													logger.info("签名公钥" + key);
+													logger.info("待签数据" + linkStr);
+													String hexSign = "";
+													try {
+														hexSign = PayCore.md5Sign(linkStr, key);
+													} catch (Exception e) {
+														e.printStackTrace();
+													}
+													logger.info("签名数据:" + hexSign);
+													requestMap.put("sign_info", hexSign);
+													String requestStr = JSON.toJSONString(requestMap);
+													url = "http://pay.unvpay.com/services/ysFast/addInfo";
+													String respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
+													logger.info("返回值：" + respStr);
+													json = JSONObject.parseObject(respStr);
+													if ("0000".equals(json.getString("ret_code"))) {
+														String app_id = json.getString("app_id");
+														logger.info("上游返回的app_id：" + app_id);
+														Map<String, String> requestMap1 = new HashMap<String, String>();
+
+														requestMap1.put("merchId", "m1803070001"); // 支付系统分配给商户的机构号
+														requestMap1.put("appId", app_id); // 商户号
+														requestMap1.put("fastRate", originalinfo.getV_userFee());
+														requestMap1.put("channel", "WLB");
+														// 加密签名
+														Map<String, ?> filterMap1 = null;
+														try {
+															filterMap1 = PayCore.paraFilter(requestMap1);
+														} catch (Exception e1) {
+															// TODO Auto-generated catch block
+															e1.printStackTrace();
+														}
+														String linkStr1 = PayCore.createLinkString(filterMap1);
+														logger.info("签名公钥" + key);
+														logger.info("待签数据" + linkStr1);
+														String hexSign1 = "";
+														try {
+															hexSign1 = PayCore.md5Sign(linkStr1, key);
+														} catch (Exception e) {
+															e.printStackTrace();
+														}
+														logger.info("签名数据:" + hexSign1);
+														requestMap1.put("sign_info", hexSign1);
+														String requestStr1 = JSON.toJSONString(requestMap1);
+
+														url = "http://pay.unvpay.com/services/ysFast/addRate";
+														String respStr1 = HttpClientUtil.post(url, "UTF-8",
+																requestStr1);
+														logger.info("返回值：" + respStr1);
+														json = JSONObject.parseObject(respStr1);
+														if ("0000".equals(json.getString("ret_code"))) {
+															app_id = json.getString("app_id");
+															logger.info("上游返回的app_id：" + app_id);
+															PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
+															merchartInfo.setAccount(app_id);// 账号
+															merchartInfo.setMerchartId(originalinfo.getV_mid());
+															merchartInfo
+																	.setMerchartName(merchantList.get(0).getMercName());
+															merchartInfo.setMerchartNameSort(
+																	merchantList.get(0).getShortname());
+															merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
+															merchartInfo.setCardNo(originalinfo.getV_settleCardNo());// 卡号
+															merchartInfo.setRealName(originalinfo.getV_settleName());// 姓名
+															merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
+															// merchartInfo.setAccountType(payRequest.getBusinessType());//账户类型
+															merchartInfo.setBankName(bank.getBank_name());// 开户行
+															merchartInfo
+																	.setPmsBankNo(originalinfo.getV_settlePmsBankNo());// 联行号
+															merchartInfo.setProvince(bank.getBank_province());// 省份
+															merchartInfo.setCity(bank.getBank_city());// 城市
+															merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
+															// merchartInfo.setWithdrawDepositSingleFee(payRequest.getWithdrawDepositSingleFee());//提现单笔手续费
+															merchartInfo.setoAgentNo("100333");
+															merchartInfo.setRateCode(originalinfo.getV_mid());
+															int i = weixinService.updateRegister(merchartInfo);
+															if (i > 0) {
+																PmsWeixinMerchartInfo pm = new PmsWeixinMerchartInfo();
+
+																pm.setCardNo(originalinfo.getV_cardNo());
+																pm.setRealName(originalinfo.getV_realName());
+																pm.setCertNo(originalinfo.getV_cert_no());
+																pm.setMobile(originalinfo.getV_phone());
+
+																PmsWeixinMerchartInfo pwm = weixinService
+																		.selectByCardEntity(pm);
+
+																logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(pwm));
+																if (pwm == null) {
+																	Map<String, String> requestMap2 = new HashMap<String, String>();
+																	requestMap2.put("order_num",
+																			originalinfo.getV_oid()); // 流水号
+																	requestMap2.put("app_id", app_id); // appId
+																	requestMap2.put("account_no",
+																			originalinfo.getV_cardNo()); // 银行账号
+																	requestMap2.put("mobile",
+																			originalinfo.getV_phone()); // 银行预留电话，不填则使用进件电话
+																	if ("1".equals(originalinfo.getV_accountType())) {
+																		requestMap2.put("card_type", "01"); // 卡类型
+																	} else if ("2"
+																			.equals(originalinfo.getV_accountType())) {
+																		requestMap2.put("card_type", "02"); // 卡类型
+																	}
+
+																	String call_back_url = BaseUtil.url
+																			+ "/quickPayAction/syysReturnUrl.action?order_num="
+																			+ originalinfo.getV_oid();
+
+																	requestMap2.put("call_back_url", call_back_url); // 跳转页面地址
+																	requestMap2.put("notify_url", BaseUtil.url
+																			+ "/quickPayAction/syysNotifyUrl.action"); // 接收异步通知地址
+																	requestMap2.put("open_type", "JF_OPEN"); // 开卡类型，为空，默认为UNION_PAY_OPEN
+																	requestMap2.put("channel", "WLB"); // 渠道
+																	requestMap2.put("version", "V2.1.1"); // 版本编号
+																	requestMap2.put("charset", "UTF-8"); // 字符编码
+
+																	// 得到带签名数据
+																	filterMap = PayCore.paraFilter(requestMap2);
+
+																	linkStr = PayCore.createLinkString(filterMap);
+																	logger.info("签名公钥" + key);
+																	logger.info("待签数据" + linkStr);
+																	hexSign = "";
+																	try {
+																		hexSign = PayCore.md5Sign(linkStr, key);
+																	} catch (Exception e) {
+																		e.printStackTrace();
+																	}
+																	logger.info("签名数据:" + hexSign);
+																	requestMap2.put("sign_type", "MD5"); // md5签名
+																	requestMap2.put("sign_info", hexSign);
+																	requestStr = JSON.toJSONString(requestMap2);
+																	url = "http://pay.unvpay.com/services/fastpay/openCard";
+																	respStr = HttpClientUtil.post(url, "UTF-8",
+																			requestStr);
+																	logger.info("返回值：" + respStr);
+																	json = JSONObject.parseObject(respStr);
+																	if ("0000".equals(json.get("ret_code"))) {
+																		String param = json.getString("ret_data");
+																		JSONObject jb = JSONObject.parseObject(param);
+																		String auth_id = (String) jb.get("auth_id");
+																		merchartInfo = new PmsWeixinMerchartInfo();
+																		merchartInfo.setAccount(auth_id);// 账号
+																		merchartInfo
+																				.setMerchartId(originalinfo.getV_mid());
+																		merchartInfo.setMerchartName(
+																				merchantList.get(0).getMercName());
+																		merchartInfo.setMerchartNameSort(
+																				merchantList.get(0).getShortname());
+																		merchartInfo
+																				.setCertNo(originalinfo.getV_cert_no());// 证件号
+																		merchartInfo
+																				.setCardNo(originalinfo.getV_cardNo());// 卡号
+																		merchartInfo.setRealName(
+																				originalinfo.getV_realName());// 姓名
+																		merchartInfo
+																				.setMobile(originalinfo.getV_phone());// 手机号
+																		merchartInfo.setBankName(bank.getBank_name());// 开户行
+																		merchartInfo
+																				.setProvince(bank.getBank_province());// 省份
+																		merchartInfo.setCity(bank.getBank_city());// 城市
+																		merchartInfo.setDebitRate(
+																				originalinfo.getV_userFee());// 借记卡费率
+																		merchartInfo.setoAgentNo("100333");
+																		merchartInfo
+																				.setRateCode(originalinfo.getV_mid());
+																		i = weixinService.updateRegister(merchartInfo);
+																		if (i > 0) {
+																			OriginalOrderInfo oo = new OriginalOrderInfo();
+																			oo.setByUser(app_id);
+																			oo.setSumCode(auth_id);
+																			oo.setOrderId(originalinfo.getV_oid());
+																			num = originalDao.update(oo);
+																			if (num > 0) {
+																				url = (String) jb.get("qr_code");
+																				logger.info("沈阳银盛返回的url:" + url);
+																				retMap.put("url", url);
+																				retMap.put("v_code", "00000");
+																				retMap.put("v_msg", "请求成功");
+																			} else {
+																				logger.info("app_id修改失败!");
+																			}
+																		}
+
+																	} else {
+
+																		retMap.put("v_code", "15");
+																		retMap.put("v_msg", "请求失败");
+																		return retMap;
+																	}
+																} else {
+																	logger.info("沈阳银盛进件app_id:" + model.getAccount());
+																	logger.info("沈阳银盛进件:auth_id" + pwm.getAccount());
+																	Map<String, String> requestMap2 = new HashMap<String, String>();
+																	requestMap2.put("order_num",
+																			originalinfo.getV_oid()); // 流水号
+																	requestMap2.put("app_id", model.getAccount()); // appId
+																	requestMap2.put("auth_id", pwm.getAccount()); // 银行账号
+																	Double amount = Double
+																			.parseDouble(originalinfo.getV_txnAmt());
+																	Integer number1 = amount.intValue();
+																	requestMap2.put("amount", number1.toString());
+																	requestMap2.put("encrypt", "T0"); // 卡类
+
+																	key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+																	// 得到带签名数据
+																	filterMap = PayCore.paraFilter(requestMap2);
+
+																	linkStr = PayCore.createLinkString(filterMap);
+																	logger.info("沈阳银盛签名公钥" + key);
+																	logger.info("沈阳银盛待签数据" + linkStr);
+																	hexSign = PayCore.md5Sign(linkStr, key);
+																	logger.info("沈阳银盛签名数据:" + hexSign);
+																	requestMap2.put("sign_type", "MD5"); // md5签名
+																	requestMap2.put("sign_info", hexSign);
+																	requestStr = JSON.toJSONString(requestMap2);
+
+																	url = "http://pay.unvpay.com/services/fastpay/submitOrder";
+																	respStr = xdt.quickpay.syys.HttpClientUtil.post(url,
+																			"UTF-8", requestStr);
+
+																	logger.info("沈阳银盛短信返回值：" + respStr);
+																	json = com.alibaba.fastjson.JSONObject
+																			.parseObject(respStr);
+																	if ("0000".equals(json.getString("ret_code"))) {
+
+																		JSONObject jb = json.getJSONObject("ret_data");
+																		String param = jb.getString("parmMap");
+																		logger.info("沈阳银盛短信返回的ret_data：" + param);
+																		JSONObject jb1 = JSONObject.parseObject(param);
+																		String token = jb1.getString("token");
+																		logger.info("沈阳银盛短信返回的token：" + token);
+																		OriginalOrderInfo oo = new OriginalOrderInfo();
+																		oo.setOrderId(originalinfo.getV_oid());
+																		oo.setSumCode(token);
+																		oo.setByUser(model.getAccount());
+																		;
+																		oo.setProcdutNum("0000");
+																		num = originalDao.update(oo);
+																		if (num > 0) {
+																			retMap.put("v_mid",
+																					originalinfo.getV_mid());
+																			retMap.put("v_txnAmt",
+																					originalinfo.getV_txnAmt());
+																			retMap.put("v_time",
+																					originalinfo.getV_time());
+																			retMap.put("v_code", "00");
+																			retMap.put("v_msg", "请求成功");
+																			retMap.put("v_oid",
+																					originalinfo.getV_oid());
+																		}
+																	}
+
+																}
+
+															}
+
+														} else {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+															return retMap;
+														}
+
+													} else {
+
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+														return retMap;
+													}
+
+												} else {
+													logger.info("沈阳银盛进件app_id:" + model.getAccount());
+													PmsWeixinMerchartInfo pm = new PmsWeixinMerchartInfo();
+
+													pm.setCardNo(originalinfo.getV_cardNo());
+													pm.setRealName(originalinfo.getV_realName());
+													pm.setCertNo(originalinfo.getV_cert_no());
+													pm.setMobile(originalinfo.getV_phone());
+
+													PmsWeixinMerchartInfo pwm = weixinService.selectByCardEntity(pm);
+
+													logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(pwm));
+													if (pwm == null) {
+
+														String app_id = model.getAccount().replaceAll(" ", "");
+														Map<String, String> requestMap2 = new HashMap<String, String>();
+
+														requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
+														requestMap2.put("app_id", app_id); // appId
+														requestMap2.put("account_no", originalinfo.getV_cardNo()); // 银行账号
+														requestMap2.put("mobile", originalinfo.getV_phone()); // 银行预留电话，不填则使用进件电话
+														if ("1".equals(originalinfo.getV_accountType())) {
+															requestMap2.put("card_type", "01"); // 卡类型
+														} else if ("2".equals(originalinfo.getV_accountType())) {
+															requestMap2.put("card_type", "02"); // 卡类型
+														}
+
+														String call_back_url = BaseUtil.url
+																+ "/quickPayAction/syysReturnUrl.action?order_num="
+																+ originalinfo.getV_oid();
+
+														requestMap2.put("call_back_url", call_back_url); // 跳转页面地址
+														requestMap2.put("notify_url",
+																BaseUtil.url + "/quickPayAction/syysNotifyUrl.action"); // 接收异步通知地址
+														requestMap2.put("open_type", "JF_OPEN"); // 开卡类型，为空，默认为UNION_PAY_OPEN
+														requestMap2.put("channel", "WLB"); // 渠道
+														requestMap2.put("version", "V2.1.1"); // 版本编号
+														requestMap2.put("charset", "UTF-8"); // 字符编码
+														String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+														// 得到带签名数据
+														Map<String, ?> filterMap = PayCore.paraFilter(requestMap2);
+
+														String linkStr = PayCore.createLinkString(filterMap);
+														logger.info("签名公钥" + key);
+														logger.info("待签数据" + linkStr);
+														String hexSign = "";
+														try {
+															hexSign = PayCore.md5Sign(linkStr, key);
+														} catch (Exception e) {
+															e.printStackTrace();
+														}
+														logger.info("签名数据:" + hexSign);
+														requestMap2.put("sign_type", "MD5"); // md5签名
+														requestMap2.put("sign_info", hexSign);
+														String requestStr = JSON.toJSONString(requestMap2);
+														url = "http://pay.unvpay.com/services/fastpay/openCard";
+														String respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
+														logger.info("返回值：" + respStr);
+														json = JSONObject.parseObject(respStr);
+														if ("0000".equals(json.get("ret_code"))) {
+															String param = json.getString("ret_data");
+															JSONObject jb = JSONObject.parseObject(param);
+															String auth_id = (String) jb.get("auth_id");
+															PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
+															merchartInfo.setAccount(auth_id);// 账号
+															merchartInfo.setMerchartId(originalinfo.getV_mid());
+															merchartInfo
+																	.setMerchartName(merchantList.get(0).getMercName());
+															merchartInfo.setMerchartNameSort(
+																	merchantList.get(0).getShortname());
+															merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
+															merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
+															merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
+															merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
+															merchartInfo.setBankName(bank.getBank_name());// 开户行
+															merchartInfo.setProvince(bank.getBank_province());// 省份
+															merchartInfo.setCity(bank.getBank_city());// 城市
+															merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
+															merchartInfo.setoAgentNo("100333");
+															merchartInfo.setRateCode(originalinfo.getV_mid());
+															int i = weixinService.updateRegister(merchartInfo);
+															if (i > 0) {
+																OriginalOrderInfo oo = new OriginalOrderInfo();
+																oo.setByUser(app_id);
+																oo.setSumCode(auth_id);
+																oo.setOrderId(originalinfo.getV_oid());
+																num = originalDao.update(oo);
+																if (num > 0) {
+																	url = (String) jb.get("qr_code");
+																	logger.info("沈阳银盛返回的url:" + url);
+																	retMap.put("url", url);
+																	retMap.put("v_code", "00000");
+																	retMap.put("v_msg", "请求成功");
+																} else {
+																	logger.info("app_id修改失败!");
+																}
+															}
+
+														} else {
+
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+															return retMap;
+														}
+
+													} else {
+														logger.info("沈阳银盛进件app_id:" + model.getAccount());
+														logger.info("沈阳银盛进件:auth_id" + pwm.getAccount());
+														Map<String, String> requestMap2 = new HashMap<String, String>();
+														requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
+														requestMap2.put("app_id", model.getAccount()); // appId
+														requestMap2.put("auth_id", pwm.getAccount()); // 银行账号
+														Double amount = Double.parseDouble(originalinfo.getV_txnAmt());
+														Integer number1 = amount.intValue();
+														requestMap2.put("amount", number1.toString());
+														requestMap2.put("encrypt", "T0"); // 卡类
+
+														String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+														// 得到带签名数据
+														Map<String, ?> filterMap = PayCore.paraFilter(requestMap2);
+
+														String linkStr = PayCore.createLinkString(filterMap);
+														logger.info("沈阳银盛签名公钥" + key);
+														logger.info("沈阳银盛待签数据" + linkStr);
+														String hexSign = PayCore.md5Sign(linkStr, key);
+														logger.info("沈阳银盛签名数据:" + hexSign);
+														requestMap2.put("sign_type", "MD5"); // md5签名
+														requestMap2.put("sign_info", hexSign);
+														String requestStr = JSON.toJSONString(requestMap2);
+
+														url = "http://pay.unvpay.com/services/fastpay/submitOrder";
+														String respStr = xdt.quickpay.syys.HttpClientUtil.post(url,
+																"UTF-8", requestStr);
+
+														logger.info("沈阳银盛短信返回值：" + respStr);
+														json = com.alibaba.fastjson.JSONObject.parseObject(respStr);
+														if ("0000".equals(json.getString("ret_code"))) {
+
+															JSONObject jb = json.getJSONObject("ret_data");
+															String param = jb.getString("parmMap");
+															logger.info("沈阳银盛短信返回的ret_data：" + param);
+															JSONObject jb1 = JSONObject.parseObject(param);
+															String token = jb1.getString("token");
+															logger.info("沈阳银盛短信返回的token：" + token);
+															OriginalOrderInfo oo = new OriginalOrderInfo();
+															oo.setOrderId(originalinfo.getV_oid());
+															oo.setSumCode(token);
+															oo.setByUser(model.getAccount());
+															;
+															oo.setProcdutNum("0000");
+															num = originalDao.update(oo);
+															if (num > 0) {
+																retMap.put("v_mid", originalinfo.getV_mid());
+																retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																retMap.put("v_time", originalinfo.getV_time());
+																retMap.put("v_code", "00");
+																retMap.put("v_msg", "请求成功");
+																retMap.put("v_oid", originalinfo.getV_oid());
+															}
+														}
+
+													}
+
+												}
+
+												break;
+
+											case "HJZF":// 汇聚快捷获取短信验证码
+												Map<String, String> result = new HashMap<>();
+												StringBuilder strs = new StringBuilder();
+												strs.append(HJUtil.Version2);
+												strs.append(pmsBusinessPos.getBusinessnum());// pmsBusinessPos.getBusinessnum()
+												strs.append(originalinfo.getV_productDesc());
+												strs.append(originalinfo.getV_oid());
+												strs.append(originalinfo.getV_txnAmt());
+												strs.append("1");
+												strs.append("FAST");
+												strs.append(originalinfo.getV_realName());
+												strs.append("1");
+												strs.append(originalinfo.getV_cert_no());
+												strs.append(originalinfo.getV_cardNo());
+												strs.append(originalinfo.getV_expired() == null ? ""
+														: originalinfo.getV_expired());// YYYY-MM
+												strs.append(originalinfo.getV_cvn2() == null ? ""
+														: originalinfo.getV_cvn2());
+												strs.append(originalinfo.getV_phone());
+												// strs.append(originalinfo.getV_attach() == null ? "" :
+												// originalinfo.getV_attach());
+												logger.info("汇聚待签名数据:" + strs.toString());
+												// String hmac =MD5Utils.sign(str.toString(), HJUtil.privateKey,
+												// "UTF-8");//RSAUtils.sign(str.toString().getBytes("UTF-8"),
+												// HJUtil.privateKey);
+												String hmac = DigestUtils
+														.md5Hex(strs.toString() + pmsBusinessPos.getKek());// pmsBusinessPos.getKek()
+												result.put("p0_Version", HJUtil.Version2);
+												result.put("p1_MerchantNo", pmsBusinessPos.getBusinessnum());
+												result.put("p2_MerchantName",
+														URLEncoder.encode(originalinfo.getV_productDesc(), "utf-8"));
+												result.put("q1_OrderNo", originalinfo.getV_oid());
+												result.put("q2_Amount", originalinfo.getV_txnAmt());
+												result.put("q3_Cur", "1");
+												result.put("q8_FrpCode", "FAST");
+												result.put("s1_PayerName",
+														URLEncoder.encode(originalinfo.getV_realName(), "utf-8"));
+												result.put("s2_PayerCardType", "1");
+												result.put("s3_PayerCardNo", originalinfo.getV_cert_no());
+												result.put("s4_PayerBankCardNo", originalinfo.getV_cardNo());
+												if (originalinfo.getV_expired() != null
+														&& originalinfo.getV_expired() != "") {
+													result.put("s5_BankCardExpire", originalinfo.getV_expired());
+												}
+												if (originalinfo.getV_cvn2() != null
+														&& originalinfo.getV_cvn2() != "") {
+													result.put("s6_CVV2", originalinfo.getV_cvn2());
+												}
+												result.put("s7_BankMobile", originalinfo.getV_phone());
+												// if (originalinfo.getV_attach() != null && originalinfo.getV_attach()
+												// != "") {
+												// result.put("t1_ext", originalinfo.getV_attach());
+												// }
+												result.put("hmac", URLEncoder.encode(hmac, "utf-8"));
+												TreeMap<String, String> paramsMap = new TreeMap<>();
+												paramsMap.putAll(result);
+												String paramSrc = RequestUtils.getParamSrc(paramsMap);
+												logger.info("汇聚快捷支付给上游发送的数据:" + paramSrc);
+												// String retuString = RequestUtils.sendPost(HJUtil.scanCodePay,
+												// "hmac=ab00408505d7fa77077a760a3bb0cb47&p0_Version=2.0&p1_MerchantNo=888101700005315&p2_MerchantName=测试商品&q1_OrderNo=QP20180411143509323540&q2_Amount=1&q3_Cur=1&q8_FrpCode=FAST&s1_PayerName=李娟&s2_PayerCardType=1&s3_PayerCardNo=120105197510055420&s4_PayerBankCardNo=6228450028016697770&s7_BankMobile=13323358548"
+												// );
+												String retuString = PostUtils.doPost(HJUtil.quickPay, paramsMap);
+												// HttpService HT = new HttpService();
+												// String retuString = HT.POSTReturnString(HJUtil.quickPay, result,
+												// MBUtil.codeG);
+												logger.info("汇聚返回字符串参数：" + retuString);
+												net.sf.json.JSONObject jsons = net.sf.json.JSONObject
+														.fromObject(retuString);
+												if ("100".equals(jsons.get("ra_Status"))) {
+													retMap.put("v_code", "00");
+													retMap.put("v_msg", jsons.getString("rb_Msg"));
+													retMap.put("v_oid", originalinfo.getV_oid());
+													retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+
+												} else {
+													retMap.put("v_code", "01");
+													retMap.put("v_msg", jsons.getString("rb_Msg"));
+												}
+												break;
+											case "JBB":// 聚佰宝快捷
+												weixin = new PmsWeixinMerchartInfo();
+
+												weixin.setCardNo(originalinfo.getV_settleCardNo());
+												weixin.setRealName(originalinfo.getV_settleName());
+												weixin.setCertNo(originalinfo.getV_cert_no());
+												weixin.setMobile(originalinfo.getV_phone());
+
+												model = weixinService.selectByCardEntity(weixin);
+
+												logger.info("聚佰宝快捷原订单数据:" + JSON.toJSON(model));
+
+												if (model.getAccount() == null) {
+													// 商户编号
+													String merchantId = "888201711290115";
+													// 业务代码
+													String bussId = "ONL0003";
+													String key = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC35dOgycZisH24maQMHKVF4B/UNcyJULOJKCS6PUPhiLZAdPgR6ulwoWTtmN8v58PX4TDculU88aFz9CSlpfA72r0bHhhzDJdBP2Ki2Rc/RHwu6vrF9tbv0EPL7db/ECZe7CPZykLn/5JRlVpbsQWsx7gqQaiOY2nw4U6Lo13UoQIDAQAB";
+													RSAPublicKey publicKey = RSAEncrypt.loadPublicKeyByStr(key);
+													String certNo = originalinfo.getV_cert_no();
+													byte[] cipherData = RSAEncrypt.encrypt(publicKey,
+															certNo.getBytes("UTF-8"));
+													// rsa 加密之后的卡号
+													String rsacertNo = xdt.quickpay.jbb.util.Base64.encode(cipherData);
+
+													// 订单信息
+													String merOrderNum = originalinfo.getV_oid();
+
+													// 前台回调
+													String frontUrl = BaseUtil.url
+															+ "/quickPayAction/jbbNotifyUrl.action";
+													// 签名数据
+													String txnString = "bussId=" + bussId + "&certNo=" + rsacertNo
+															+ "&frontUrl=" + frontUrl + "&merchantId=" + merchantId
+															+ "&merOrderNum=" + merOrderNum + "&";
+													logger.info("聚佰宝上送的数据加密字符串:" + txnString);
+													MD5 md = new MD5();
+													String signValue = md.getMD5ofStr(txnString + "675FC1ctf2Y6zVm3");
+
+													String txn = "bussId=" + bussId + "&certNo="
+															+ URLEncoder.encode(rsacertNo, "utf-8") + "&frontUrl="
+															+ frontUrl + "&merchantId=" + merchantId + "&merOrderNum="
+															+ merOrderNum + "&signValue=" + signValue;
+
+													logger.info("聚佰宝上送的数据:" + txn);
+
+													url = "https://cashier.etonepay.com/NetPay/quickPaySign.action?"
+															+ txn;
+
+													HttpURLConection http = new HttpURLConection();
+
+													HttpUtil h = new HttpUtil();
+
+													String resonpe = http.httpURLConnectionPOST(
+															"https://cashier.etonepay.com/NetPay/quickPaySign.action",
+															txn);
+													logger.info("响应结果:" + resonpe);
+													net.sf.json.JSONObject ob = net.sf.json.JSONObject
+															.fromObject(resonpe);
+													Iterator it = ob.keys();
+													String respCode = "";
+													String html = "";
+													while (it.hasNext()) {
+														key = (String) it.next();
+														if (key.equals("respCode")) {
+
+															respCode = ob.getString(key);
+
+															logger.info("聚佰宝签约响应状态码:" + respCode);
+
+														}
+														if (key.equals("html")) {
+
+															html = ob.getString(key);
+
+															logger.info("聚佰宝签约html:" + html);
+														}
+													}
+													if ("0000".equals(respCode)) {
+														retMap.put("v_code", "00000");
+														retMap.put("v_msg", "请求成功");
+														retMap.put("html", html);
+													}
+
+												} else {
+
+													logger.info("##################聚佰宝获取短信接口##########");
+													// 商户编号
+													String merchantId = "888201711290115";
+													// 业务代码
+													String bussId = "ONL0003";
+													Integer amount = (int) (Double
+															.parseDouble(originalinfo.getV_txnAmt()) * 100);
+
+													String tranAmt = amount.toString();
+
+													String protocolNo = "";
+
+													// 订单信息
+													String merOrderNum = originalinfo.getV_oid();
+													// 签名数据
+													String txnString = "bussId=" + bussId + "&merchantId=" + merchantId
+															+ "&merOrderNum=" + merOrderNum + "&protocolNo="
+															+ protocolNo + "&tranAmt=" + tranAmt + "&";
+													logger.info("聚佰宝上送的数据加密字符串:" + txnString);
+													MD5 md = new MD5();
+													String signValue = md.getMD5ofStr(txnString + "675FC1ctf2Y6zVm3");
+
+													String txn = "bussId=" + bussId + "&merchantId=" + merchantId
+															+ "&merOrderNum=" + merOrderNum + "&protocolNo="
+															+ protocolNo + "&tranAmt=" + tranAmt.toString()
+															+ "&signValue=" + signValue;
+
+													logger.info("聚佰宝上送的数据:" + txn);
+
+													url = "https://cashier.etonepay.com/NetPay/quickPaySms.action?"
+															+ txn;
+
+													HttpURLConection http = new HttpURLConection();
+
+													HttpUtil h = new HttpUtil();
+
+													String resonpe = http.httpURLConnectionPOST(
+															"https://cashier.etonepay.com/NetPay/quickPaySms.action",
+															txn);
+													logger.info("响应结果:" + resonpe);
+													net.sf.json.JSONObject ob = net.sf.json.JSONObject
+															.fromObject(resonpe);
+													Iterator it = ob.keys();
+													String transId = "";
+
+													String respCode = "";
+													while (it.hasNext()) {
+														String key = (String) it.next();
+														if (key.equals("respCode")) {
+
+															respCode = ob.getString(key);
+
+															logger.info("聚佰宝签约响应状态码:" + respCode);
+
+														}
+														if (key.equals("merOrderNum")) {
+
+															merOrderNum = ob.getString(key);
+
+															logger.info("聚佰宝签约html:" + merOrderNum);
+														}
+														if (key.equals("transId")) {
+
+															transId = ob.getString(key);
+
+															logger.info("聚佰宝签约transId:" + transId);
+														}
+													}
+													if ("0000".equals(respCode)) {
+														OriginalOrderInfo info = new OriginalOrderInfo();
+														info.setOrderId(merOrderNum);
+														info.setByUser(transId);// 商户号
+														info.setBankId(protocolNo);
+														number = originalDao.update(info);
+														if (number > 0) {
+															retMap.put("v_oid", originalinfo.getV_oid());
+															retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+															retMap.put("v_code", "00");
+															retMap.put("v_msg", "请求成功");
+															retMap.put("v_time", originalinfo.getV_time());
+															retMap.put("v_mid", originalinfo.getV_mid());
+														}
+													}
+
+												}
+
+												break;
+											case "YFWG":// 裕福快捷
+												DecimalFormat df1 = new DecimalFormat("######0"); // 四色五入转换成整数
+												if (originalinfo.getV_userId() == null
+														|| "".equals(originalinfo.getV_userId())) {
+													retMap.put("v_code", "01");
+													retMap.put("v_msg", "v_userId is null");
+													return retMap;
+												}
+												final String merCertPath = new File(
+														this.getClass().getResource("/").getPath()).getParentFile()
+																.getParentFile().getCanonicalPath()
+														+ "//ky//" + pmsBusinessPos.getBusinessnum() + ".cer";
+												final String pfxPath = new File(
+														this.getClass().getResource("/").getPath()).getParentFile()
+																.getParentFile().getCanonicalPath()
+														+ "//ky//" + pmsBusinessPos.getBusinessnum() + ".pfx";
+												final String pfxPwd = pmsBusinessPos.getKek();
+												QuickReq req = new QuickReq();
+												YufuCipher cipher = null;
+												YufuCipherSupport instance = null;
+												cipher = YufuCipherSupport.getCipherInstance(merCertPath, pfxPath,
+														pfxPwd, cipher, instance);
+												// YufuCipher cipher = YufuCipherSupport.getCipherInstance(merCertPath,
+												// pfxPath,
+												// pfxPwd);
+												try {
+													List<Map<String, String>> list = new ArrayList<>();
+													Map<String, String> reqMaps = new HashMap<>();
+													req.setVersion("1.0.0");
+													req.setMerchantId(pmsBusinessPos.getBusinessnum());
+													req.setMerchantOrderId(originalinfo.getV_oid());
+													req.setMerchantOrderTime(originalinfo.getV_time());
+													BigDecimal payAmt = new BigDecimal(originalinfo.getV_txnAmt())
+															.setScale(2, BigDecimal.ROUND_HALF_UP)
+															.multiply(new BigDecimal(100));
+													req.setMerchantOrderAmt(df1.format(payAmt));
+													// req.setMerchantDisctAmt(merchantDisctAmt);
+													req.setMerchantOrderCurrency("156");
+													req.setGwType("04");
+													req.setBackUrl(YFUtil.notifyUrl);
+													// req.setUserType("01");
+													req.setMerchantUserId(originalinfo.getV_userId());
+
+													// {cardInfoList=, respDesc=调用接口成功, merchantId=000001220100000470,
+													// merchantUserId=1523167250194, version=1.0.0, respCode=0000}
+													req.setMerchantSettleInfo("[{\"merchantId\":\""
+															+ pmsBusinessPos.getBusinessnum() + "\",\"merchantName\":\""
+															+ originalinfo.getV_productDesc() + "\",\"orderAmt\":\""
+															+ df1.format(payAmt) + "\"," + "\"sumGoodsName \":\""
+															+ originalinfo.getV_productDesc() + "\"}]");
+
+													req.setMerchantOrderDesc(originalinfo.getV_productDesc());
+
+													// req.setMerchantSettleInfo("[{\"merchantId\":\"000001110100000812\",\"merchantName\":\"商户00000111050000001\",\"orderAmt\":100,\"sumGoodsName\":\"我是00000111050000001的商品，哈哈哈\"}]"
+													// );
+													req.setMsgExt(originalinfo.getV_attach());
+													// req.setMisc("");
+
+													if ("".equals(originalinfo.getV_verifyId())
+															|| originalinfo.getV_verifyId() == null) {
+														if ("".equals(originalinfo.getV_cardNo())
+																|| originalinfo.getV_cardNo() == null) {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "v_cardNo is null");
+															return retMap;
+														} else {
+															reqMaps.put("cardNo", originalinfo.getV_cardNo());// originalinfo.getV_cardNo()
+														}
+														if ("1".equals(originalinfo.getV_accountType())) {
+															reqMaps.put("cardType", "P1");
+														} else if ("2".equals(originalinfo.getV_accountType())) {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "此商户不支持贷记卡");
+															return retMap;
+															// reqMaps.put("cardType", "P2");
+														} else {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "v_accountType is null");
+															return retMap;
+														}
+														if (!"".equals(originalinfo.getV_realName())
+																&& originalinfo.getV_realName() != null) {
+															reqMaps.put("name", originalinfo.getV_realName());
+														} else {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "v_realName is null");
+															return retMap;
+														}
+														if (bank2 != null) {
+															reqMaps.put("bankNo", bank2.getBank_code());
+														} else {
+															reqMaps.put("bankNo", "");
+														}
+														if (!"".equals(originalinfo.getV_cert_no())
+																&& originalinfo.getV_cert_no() != null) {
+															reqMaps.put("certNo", originalinfo.getV_cert_no());
+														} else {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "v_cert_no is null");
+															return retMap;
+														}
+														reqMaps.put("certType", "01");
+														reqMaps.put("phone", originalinfo.getV_phone());
+														reqMaps.put("cvn2", originalinfo.getV_cvn2() == null ? ""
+																: originalinfo.getV_cvn2());
+														reqMaps.put("expired", originalinfo.getV_expired() == null ? ""
+																: originalinfo.getV_expired());
+														req.setPayCardList("[{\"cardNo\":\"" + reqMaps.get("cardNo")
+																+ "\",\"cardType\":\"" + reqMaps.get("cardType")
+																+ "\",\"bankNo\":\"" + reqMaps.get("bankNo")
+																+ "\",\"certNo\":\"" + reqMaps.get("certNo")
+																+ "\",\"certType\":\"01\",\"name\":\""
+																+ reqMaps.get("name") + "\",\"phone\":\""
+																+ reqMaps.get("phone") + "\",\"cvn2\":\""
+																+ reqMaps.get("cvn2") + "\",\"expired\":\""
+																+ reqMaps.get("expired") + "\"}]");
+													} else {
+														req.setVerifyId(originalinfo.getV_verifyId());
+													}
+
+													// req.setPayCardList("[{\"cardNo\":\""+originalinfo.getV_cardNo()+"\",\"cardType\":\"P1\",\"bankNo\":\"CDB\",\"certNo\":\""+originalinfo.getV_cert_no()+"\","
+													// +
+													// "\"certType\":\"01\",\"name\":\""+originalinfo.getV_realName()+"\",\"phone\":\""+originalinfo.getV_phone()+"\",\"cvn2\":\""+originalinfo.getV_cvn2()==null?"":originalinfo.getV_cvn2()+"\",\"expired\":\""+originalinfo.getV_expired()==null?"":originalinfo.getV_expired()+"\"}]");
+													//
+													// req.setPayCardList(JSONObject.toJSONString(list));
+
+													String data = GsonUtil.objToJson(req);
+													logger.info("data:" + data);
+													Map<String, String> params = GsonUtil.jsonToObj(data, Map.class);
+													ParamPacket bo = cipher.doPack(params);
+													logger.info("11!:" + JSON.toJSON(bo));
+													TreeMap<String, String> map_param = new TreeMap<>();
+													map_param.put("merchantId", pmsBusinessPos.getBusinessnum());
+													map_param.put("data", URLEncoder.encode(bo.getData(), "utf-8"));
+													map_param.put("enc", URLEncoder.encode(bo.getEnc(), "utf-8"));
+													map_param.put("sign", URLEncoder.encode(bo.getSign(), "utf-8"));
+													String urlPay = "";
+													if ("000001110100000812".equals(pmsBusinessPos.getBusinessnum())) {
+														urlPay = "http://malltest.yfpayment.com/payment/service/payset.do";
+													} else {
+														urlPay = "http://www.yfpayment.com/payment/service/payset.do";
+													}
+													String returnStr = PostUtils.doPost(urlPay, map_param);
+
+													if (returnStr != null && !"".equals(returnStr)) {
+														// 二、验签解密
+														returnStr = URLDecoder.decode(returnStr, "utf-8");
+														System.out.println("URL解码后的置单应答结果：" + returnStr);
+														TreeMap<String, String> boMap = JSON.parseObject(returnStr,
+																new TypeReference<TreeMap<String, String>>() {
+																});
+														Map<String, String> payshowParams = cipher
+																.unPack(new ParamPacket(boMap.get("data"),
+																		boMap.get("enc"), boMap.get("sign")));
+														System.out.println("解密后的置单应答结果：" + payshowParams);
+														if ("0000".equals(payshowParams.get("respCode"))) {
+															OriginalOrderInfo oo = new OriginalOrderInfo();
+															oo.setOrderId(originalinfo.getV_oid());
+															oo.setSumCode(payshowParams.get("token"));
+															oo.setProcdutNum("0000");
+															num = originalDao.update(oo);
+															if (num > 0) {
+																retMap.put("v_code", "00");
+																retMap.put("v_msg", payshowParams.get("respDesc"));
+																retMap.put("v_attach", payshowParams.get("msgExt"));
+																retMap.put("v_oid", originalinfo.getV_oid());
+																retMap.put("v_mid", originalinfo.getV_mid());
+															} else {
+																logger.info("app_id修改失败!");
+																retMap.put("v_code", "01");
+																retMap.put("v_msg", "系统错误,预下单失败");
+															}
+														} else {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", payshowParams.get("respDesc"));
+														}
+
+													} else {
+														System.out.println("置单返回报文为空！");
+													}
+												} catch (Exception e) {
+													e.printStackTrace();
+												}
+												break;
+											case "GYY":// 柜银云快捷
+												Map<String, Object> infoMap = new HashMap<String, Object>();
+												infoMap.put("agentNo", "10033");// 机构号
+												infoMap.put("merName", originalinfo.getV_productDesc());// 商户名称
+												infoMap.put("merAddr", originalinfo.getV_attach());// 商户地址
+												infoMap.put("settleName", originalinfo.getV_realName());// 结算姓名
+												infoMap.put("settlePhone", originalinfo.getV_phone());// 手机号
+												infoMap.put("settleBank", bank.getBank_short_title());// 开户银行
+												infoMap.put("settleBankNo", bank.getBank_code());// 银行简码
+												infoMap.put("settleAccount", originalinfo.getV_settleCardNo());// 结算卡号
+												infoMap.put("settleBankSub", bank.getBank_name());// 开户支行
+												infoMap.put("settleBankBranch", originalinfo.getV_settlePmsBankNo());// 联行号
+												infoMap.put("settleSubProvince", bank.getBank_province());// 开户省
+												infoMap.put("settleSubCity", bank.getBank_city());// 开户市
+
+												infoMap.put("settleIdCard", originalinfo.getV_cert_no());// 身份证号
+												String params = ApiUtil.sortMap(infoMap);
+												logger.info("柜银云商户入驻提交信息：" + params);
+												String reStr = ApiUtil.sendPost(
+														"http://139.224.27.56/ygww/sys/api/outer/addMer.do", params);
+												logger.info("柜银云商户入驻返回结果：" + reStr);
+												Map reMap = ApiUtil.toMap(reStr);
+												String respCodes = reMap.get("respCode").toString();
+												logger.info("柜银云商户入驻状态码：" + respCodes);
+												String merKeys = "";
+												String merNo = "";
+												String checkFlag = "";
+												String expired = originalinfo.getV_expired();
+												char[] cc = expired.toCharArray();
+												StringBuffer bb = new StringBuffer();
+												bb.append(cc[2]);
+												bb.append(cc[3]);
+												bb.append(cc[0]);
+												bb.append(cc[1]);
+												logger.info("下游上传的信用卡有效期：" + bb);
+												if ("0000".equals(respCodes)) {
+													merKeys = reMap.get("merKey").toString();
+													logger.info("柜银云商户入驻返回商户密钥：" + merKeys);
+													merNo = reMap.get("merNo").toString();
+													logger.info("柜银云商户入驻返回商户号：" + merNo);
+
+													Map<String, Object> infoMaps = new HashMap<String, Object>();
+													infoMaps.put("agentNo", "10033");// 机构号
+													infoMaps.put("merNo", merNo);// 商户号
+													infoMaps.put("service", "ncldd0");// 通道
+													infoMaps.put("lservice", "checkName");// 接口
+													infoMaps.put("out_trade_no", ApiUtil.newDateMore());// 交易流水号
+													infoMaps.put("payRate", originalinfo.getV_userFee());// 交易流水号
+													infoMaps.put("settleFee", originalinfo.getV_settleUserFee());// 交易流水号
+													params = ApiUtil.sortMap(infoMaps);
+													sign = xdt.quickpay.gyy.util.MD5.getSign(infoMaps, merKeys);
+													params += "&sign=" + sign;
+													logger.info("柜银云开通快捷提交信息：" + params);
+													reStr = ApiUtil.sendPost(
+															"http://139.224.27.56/ygww/sys/api/outer/geteway.do",
+															params);
+													logger.info("柜银云开通快捷返回结果：" + reStr);
+													reMap = ApiUtil.toMap(reStr);
+													respCodes = reMap.get("respCode").toString();
+													logger.info("柜银云商户入驻状态码：" + respCodes);
+													if ("0000".equals(respCodes)) {
+														Map<String, Object> infoMapss = new HashMap<String, Object>();
+														infoMapss.put("agentNo", "10033");// 机构号
+														infoMapss.put("merNo", merNo);// 商户号
+														infoMapss.put("service", "ncldd0");// 通道
+														infoMapss.put("lservice", "applyTrade");// 接口
+														infoMapss.put("accNo", originalinfo.getV_cardNo());// 交易卡
+														infoMapss.put("out_trade_no", originalinfo.getV_oid());// 交易流水
+														infoMapss.put("cvn2", originalinfo.getV_cvn2());// cvn2
+
+														infoMapss.put("useTime", bb);// 有效期
+														infoMapss.put("orderTime", originalinfo.getV_time());// 接口
+														infoMapss.put("amount", originalinfo.getV_txnAmt());// 交易金额，元
+
+														params = ApiUtil.sortMap(infoMapss);
+														sign = xdt.quickpay.gyy.util.MD5.getSign(infoMapss, merKeys);
+														params += "&sign=" + sign;
+														logger.info("柜银云开通快捷提交信息：" + params);
+														reStr = ApiUtil.sendPost(
+																"http://139.224.27.56/ygww/sys/api/outer/geteway.do",
+																params);
+														logger.info("柜银云开通快捷返回结果：" + reStr);
+														reMap = ApiUtil.toMap(reStr);
+														respCodes = reMap.get("respCode").toString();
+														logger.info("柜银云开通快捷状态码：" + respCodes);
+														if ("0000".equals(respCodes)) {
+															checkFlag = reMap.get("checkFlag").toString();
+															Map<String, Object> infoMapsss = new HashMap<String, Object>();
+															infoMapsss.put("agentNo", "10033");// 机构号
+															infoMapsss.put("merNo", merNo);// 商户号
+															infoMapsss.put("service", "ncldd0");// 通道
+															infoMapsss.put("lservice", "sendSMS");// 接口
+															infoMapsss.put("cvn2", originalinfo.getV_cvn2());// cvn2
+															infoMapsss.put("phone", originalinfo.getV_phone());// cvn2
+															infoMapsss.put("useTime", bb);// 有效期
+															infoMapsss.put("out_trade_no", originalinfo.getV_oid());// 交易流水
+															infoMapsss.put("orderTime", originalinfo.getV_time());// 交易时间
+															infoMapsss.put("checkFlag", checkFlag);// 交易标记
+
+															params = ApiUtil.sortMap(infoMapsss);
+															sign = xdt.quickpay.gyy.util.MD5.getSign(infoMapsss,
+																	merKeys);
+															params += "&sign=" + sign;
+															System.out.println("柜银云获取短信提交信息：" + params);
+															reStr = ApiUtil.sendPost(
+																	"http://139.224.27.56/ygww/sys/api/outer/geteway.do",
+																	params);
+															System.out.println("柜银云获取短信返回结果：" + reStr);
+															reMap = ApiUtil.toMap(reStr);
+															respCodes = reMap.get("respCode").toString();
+															logger.info("柜银云开通快捷状态码：" + respCodes);
+															if ("0000".equals(respCodes)) {
+																OriginalOrderInfo info = new OriginalOrderInfo();
+																info.setOrderId(originalinfo.getV_oid());
+																info.setByUser(merNo);// 商户号
+																info.setSumCode(merKeys);
+																info.setBankId(checkFlag);
+																number = originalDao.update(info);
+																if (number > 0) {
+																	retMap.put("v_mid", originalinfo.getV_mid());
+																	retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																	retMap.put("v_time", originalinfo.getV_time());
+																	retMap.put("v_code", "00");
+																	retMap.put("v_msg", "请求成功");
+																	retMap.put("v_oid", originalinfo.getV_oid());
+																} else {
+																	retMap.put("v_code", "15");
+																	retMap.put("v_msg", "请求失败");
+																}
+															} else {
+																retMap.put("v_code", "15");
+																retMap.put("v_msg", "请求失败");
+															}
+														} else {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+														}
+
+													} else {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													}
+
+												} else {
+													retMap.put("v_code", "15");
+													retMap.put("v_msg", "请求失败");
+												}
+
+												break;
+											case "SHYL":// 上海漪雷快捷
+												logger.info("###########上海漪雷快捷绑卡接口##########");
+												Map<String, Object> infos = new HashMap<String, Object>();
+												infos.put("tranType", "14000");// 机构号
+												infos.put("merName", originalinfo.getV_productDesc());// 商户名称
+												infos.put("merAddress", originalinfo.getV_productDesc());// 商户地址
+
+												// 对特殊字段进行公钥加密
+												PublicKey publicKey = RSAUtil.getPublicKey(PUBLIC_KEY);
+												Cipher ciphers = Cipher.getInstance("RSA");
+												ciphers.init(Cipher.ENCRYPT_MODE, publicKey);
+												// 姓名加密
+												String name = ciphers.doFinal(originalinfo.getV_realName().getBytes())
+														.toString();
+												// 身份证加密
+												String idcard = ciphers.doFinal(originalinfo.getV_cert_no().getBytes())
+														.toString();
+												// 借记卡加密
+												String bankCard = ciphers
+														.doFinal(originalinfo.getV_settleCardNo().getBytes())
+														.toString();
+												infos.put("name", name);// 结算姓名
+												infos.put("idcard", idcard);// 手机号
+												infos.put("bankCard", bankCard);// 开户银行
+												infos.put("bankName", bank.getBank_short_title());// 银行简码
+												infos.put("bankNo", "GSYH");// 结算卡号
+												// 手机号加密
+												String preMobile = ciphers.doFinal(originalinfo.getV_phone().getBytes())
+														.toString();
+												infos.put("preMobile", preMobile);// 开户支行
+												infos.put("bankCode", originalinfo.getV_settlePmsBankNo());// 联行号
+												infos.put("branchBank", bank.getBank_name());// 开户省
+												infos.put("province", bank.getBank_province());// 开户市
+												infos.put("city", bank.getBank_city());// 身份证号
+												infos.put("tradeRate",
+														Double.parseDouble(originalinfo.getV_userFee()) * 100 + "");// 身份证号
+												infos.put("drawFee", originalinfo.getV_settleUserFee());// 身份证号
+												infos.put("custNo", originalinfo.getV_userId());// 身份证号
+												String stris = RSAUtil.getSign(infos);
+												logger.info("上海漪雷快捷绑卡签名前的数据:" + stris);
+												// RSA私钥签名
+												String signature = RSAUtil.sign(stris.getBytes("UTF-8"), PRIVACE_KEY);
+
+												Map<String, String> mapstr = new HashMap<String, String>();
+
+												mapstr.put("version", "1.0.0");
+												mapstr.put("platformNos", "P20171012861761863371");
+												mapstr.put("channelNo", "C20180424609343188755");
+												mapstr.put("merNo", "M20180424611894665448");
+												mapstr.put("signature", signature);
+												logger.info("上海漪雷快捷绑卡上送的数据:" + HttpURLConection.parseParams(mapstr));
+												String resultcode = HttpURLConection.httpURLConnectionPOST(
+														"http://spapi.beichuanglangrun.com/trade/handle",
+														HttpURLConection.parseParams(mapstr));
+
+												logger.info("上海漪雷快捷绑卡响应的数据:" + resultcode);
+												logger.info("###########上海漪雷快捷获取短信验证码##########");
+												Map<String, Object> infoMaps = new HashMap<String, Object>();
+												infoMaps.put("tranType", "14000");// 机构号
+												infoMaps.put("orderAmount", originalinfo.getV_productDesc());// 商户名称
+												infoMaps.put("subject", originalinfo.getV_attach());// 商户地址
+												infoMaps.put("merOrderNo", "M20180413085019363857");// 结算姓名
+												infoMaps.put("orderNo", originalinfo.getV_phone());// 手机号
+												infoMaps.put("tradeRate", bank.getBank_short_title());// 开户银行
+												infoMaps.put("drawFee", bank.getBank_code());// 银行简码
+												infoMaps.put("payBankCard", originalinfo.getV_settleCardNo());// 结算卡号
+												infoMaps.put("payBankName", bank.getBank_name());// 开户支行
+												infoMaps.put("payPreMobile", originalinfo.getV_settlePmsBankNo());// 联行号
+												infoMaps.put("cvn2", bank.getBank_province());// 开户省
+												infoMaps.put("expired", bank.getBank_city());// 开户市
+												infoMaps.put("payBankCode", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("name", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("idcard", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("bankCard", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("bankName", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("bankCode", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("preMobile", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("backUrl", originalinfo.getV_cert_no());// 身份证号
+												break;
+											default:
+												break;
+											}
+										}
+									}
+
+								} else {
+
+									logger.error("姓名已被列入黑名单，请联系业务经理!");
+									retMap.put("v_code", "123");
+									retMap.put("v_msg", "姓名已被列入黑名单，请联系业务经理!");
+									return retMap;
+								}
+
+							} else {
+
+								logger.error("证件号已被列入黑名单，请联系业务经理!");
+								retMap.put("v_code", "123");
+								retMap.put("v_msg", "证件号已被列入黑名单，请联系业务经理!");
+								return retMap;
+							}
+
+						} else {
+							logger.error("卡号已被列入黑名单，请联系业务经理!");
+							retMap.put("v_code", "123");
+							retMap.put("v_msg", "卡号已被列入黑名单，请联系业务经理!");
+							return retMap;
+						}
+					} else {
+						logger.error("商户已被列入黑名单，请联系业务经理!");
+						retMap.put("v_code", "123");
+						retMap.put("v_msg", "商户已被列入黑名单，请联系业务经理!");
+						return retMap;
+					}
+
+				} else {
 					if (Double.parseDouble(PmsQuodaList.get(0).getMinQuota()) <= Double
 							.parseDouble(originalinfo.getV_txnAmt())
 							&& Double.parseDouble(PmsQuodaList.get(0).getMaxQuota()) >= Double
@@ -573,1369 +2887,1341 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 										PmsQuodaList.get(0).getTotalQuota()) >= Double.parseDouble(sum_mounth_amount)
 												/ 100) {
 
-									// 校验商户号是否在黑名单中
-									PmsDangerControlBlack pmsBlackMerID = new PmsDangerControlBlack();
-									pmsBlackMerID.setMercId(merchantinfo.getMercId());
-									List<PmsDangerControlBlack> pmsBlackListMerID = pmsDangerControlBlack
-											.searchList(pmsBlackMerID);
-									if (pmsBlackListMerID.size() == 0 || pmsBlackListMerID.isEmpty()) {
+									// 实际金额
+									String factAmount = ""
+											+ new BigDecimal(originalinfo.getV_txnAmt()).multiply(new BigDecimal(100));
 
-										// 校验卡号是否在黑名单中
-										PmsDangerControlBlack pmsBlackCardNo = new PmsDangerControlBlack();
-										pmsBlackCardNo.setCardNo(originalinfo.getV_cardNo());
-										List<PmsDangerControlBlack> pmsBlackListCardNo = pmsDangerControlBlack
-												.searchList(pmsBlackCardNo);
-										if (pmsBlackListCardNo.size() == 0 || pmsBlackListCardNo.isEmpty()) {
-											// 校验证件号是否在黑名单中
-											PmsDangerControlBlack pmsBlackCerdNo = new PmsDangerControlBlack();
-											pmsBlackCerdNo.setCertNo(originalinfo.getV_cert_no());
-											List<PmsDangerControlBlack> pmsBlackListCerdNo = pmsDangerControlBlack
-													.searchList(pmsBlackCerdNo);
-											if (pmsBlackListCerdNo.size() == 0 || pmsBlackListCerdNo.isEmpty()) {
-												
-												// 校验姓名是否在黑名单中
-												PmsDangerControlBlack pmsBlackName = new PmsDangerControlBlack();
-												pmsBlackName.setRealname(originalinfo.getV_realName());
-												List<PmsDangerControlBlack> pmsBlackListName = pmsDangerControlBlack
-														.searchList(pmsBlackName);
-												if (pmsBlackListName.size() == 0 || pmsBlackListName.isEmpty()) {
-													
-													// 实际金额
-													String factAmount = "" + new BigDecimal(originalinfo.getV_txnAmt()).multiply(new BigDecimal(100));
+									if (pmsBusinessPos == null) {
+										retMap.put("v_code", "18");
+										retMap.put("v_msg", "未找到路由，请联系业务开通！");
+										return retMap;
+									}
+									// 判断入金是否开启
+									if ("1".equals(pmsBusinessPos.getOutPay())) {
+										retMap.put("v_code", "19");
+										retMap.put("v_msg", "入金未开通,请联系业务经理!");
+										return retMap;
+									}
+									// 校验欧单金额限制
+									ResultInfo payCheckResult = iPublicTradeVerifyService.amountVerifyOagent(
+											(int) Double.parseDouble(factAmount), TradeTypeEnum.merchantCollect,
+											oAgentNo);
+									if (!payCheckResult.getErrCode().equals("0")) {
+										// 交易不支持
+										logger.info("欧单金额限制，oAagentNo:" + oAgentNo + ",payType:"
+												+ PaymentCodeEnum.moBaoQuickPay.getTypeCode());
+										return setResp("05", "欧单金额限制，请重试或联系客服");
+									}
 
-													if (pmsBusinessPos == null) {
-														retMap.put("v_code", "18");
-														retMap.put("v_msg", "未找到路由，请联系业务开通！");
-														return retMap;
+									// 校验欧单模块是否开启
+									ResultInfo resultInfoForOAgentNo = iPublicTradeVerifyService
+											.moduleVerifyOagent(TradeTypeEnum.merchantCollect, oAgentNo);
+									if (!resultInfoForOAgentNo.getErrCode().equals("0")) {
+										// 交易不支持
+										if (StringUtils.isEmpty(resultInfoForOAgentNo.getMsg())) {
+											logger.error("交易关闭，请重试或联系客服");
+											return setResp("06", "交易关闭，请重试或联系客服");
+										} else {
+											return setResp("07", "系统异常，请重试或联系客服");
+										}
+
+									}
+									// 校验商户模块是否开启
+									ResultInfo payCheckResult3 = iPublicTradeVerifyService
+											.moduelVerifyMer(TradeTypeEnum.merchantCollect, mercId);
+									if (!payCheckResult3.getErrCode().equals("0")) {
+										// 交易不支持
+										logger.info("商户模块限制，oAagentNo:" + oAgentNo + ",payType:"
+												+ PaymentCodeEnum.moBaoQuickPay.getTypeCode());
+										return setResp("08", "商户模块限制,请重试或联系客服");
+									}
+									// 校验商户金额限制
+									Map<String, String> paramMap = new HashMap<String, String>();
+									paramMap.put("mercid", merchantinfo.getMercId());// 商户编号
+									paramMap.put("businesscode", TradeTypeEnum.merchantCollect.getTypeCode());// 业务编号
+									paramMap.put("oAgentNo", oAgentNo);
+									// 商户 网购 业务信息
+									Map<String, String> resultMap = merchantMineDao.queryBusinessInfo(paramMap);
+
+									if (resultMap == null || resultMap.size() == 0) {
+										// 若查到的是空值，直接返回错误
+										logger.info("没有查到相关费率配置：" + merchantinfo.getMobilephone());
+										return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
+									}
+
+									String maxTransMoney = resultMap.get("MAX_AMOUNT"); // 每笔最大交易金额
+									String minTransMoney = resultMap.get("MIN_AMOUNT"); // 每笔最小交易金额
+									String paymentAmount = factAmount;// 交易金额
+
+									if (new BigDecimal(paymentAmount).compareTo(new BigDecimal(maxTransMoney)) == 1) {
+										// 金额超过最大金额
+										logger.info("交易金额大于最打金额");
+										return setResp("10", "金额超过最大交易金额");
+									} else if (new BigDecimal(paymentAmount)
+											.compareTo(new BigDecimal(minTransMoney)) == -1) {
+										// 金额小于最小金额
+										logger.info("交易金额小于最小金额");
+										return setResp("11", "交易金额小于最小金额");
+
+									}
+
+									// 组装订单数据
+									PmsAppTransInfo pmsAppTransInfo = new PmsAppTransInfo();
+									// 写入欧单编号
+									pmsAppTransInfo.setoAgentNo(oAgentNo);
+									pmsAppTransInfo.setStatus(OrderStatusEnum.initlize.getStatus());// 订单初始化状态
+									pmsAppTransInfo.setTradetype(TradeTypeEnum.merchantCollect.getTypeName());// 业务功能模块名称
+									// ：网购
+									pmsAppTransInfo.setTradetime(UtilDate.getDateFormatter()); // 设置时间
+									pmsAppTransInfo.setMercid(merchantinfo.getMercId());
+									pmsAppTransInfo.setTradetypecode(TradeTypeEnum.merchantCollect.getTypeCode());// 业务功能模块编号
+									// ：17
+									pmsAppTransInfo.setOrderid(originalinfo.getV_oid());// 设置订单号
+									pmsAppTransInfo.setPaymenttype(PaymentCodeEnum.moBaoQuickPay.getTypeName());
+									pmsAppTransInfo.setPaymentcode(PaymentCodeEnum.moBaoQuickPay.getTypeCode());
+									BigDecimal factBigDecimal = new BigDecimal(factAmount);
+									BigDecimal orderAmountBigDecimal = new BigDecimal(factAmount);
+									pmsAppTransInfo.setBusinessNum(pmsBusinessPos.getBusinessnum());
+									pmsAppTransInfo.setFactamount(factBigDecimal.stripTrailingZeros().toPlainString());// 实际金额
+									pmsAppTransInfo
+											.setOrderamount(orderAmountBigDecimal.stripTrailingZeros().toPlainString());// 订单金额
+									pmsAppTransInfo.setDrawMoneyType("1");// 普通提款
+									if ("0".equals(originalinfo.getV_type())) {
+										pmsAppTransInfo.setSettlementState("D0");
+									}
+									if ("1".equals(originalinfo.getV_type())) {
+
+										pmsAppTransInfo.setSettlementState("T1");
+									}
+
+									// 插入订单信息
+									Integer insertAppTrans = pmsAppTransInfoDao.insert(pmsAppTransInfo);
+									if (insertAppTrans == 1) {
+
+										// 查询订单信息
+										pmsAppTransInfo = pmsAppTransInfoDao
+												.searchOrderInfo(pmsAppTransInfo.getOrderid());
+
+										String quickRateType = resultMap.get("QUICKRATETYPE").toString();// 快捷支付费率类型
+
+										// 获取o单第三方支付的费率
+										AppRateConfig appRate = new AppRateConfig();
+										appRate.setRateType(quickRateType);
+										appRate.setoAgentNo(oAgentNo);
+										AppRateConfig appRateConfig = appRateConfigDao
+												.getByRateTypeAndoAgentNo(appRate);
+
+										if (appRateConfig == null) {
+											// 若查到的是空值，直接返回错误
+											// 若查到的是空值，直接返回错误
+											logger.info("没有查到相关费率配置：" + merchantinfo.getMobilephone());
+											return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
+
+										}
+
+										String isTop = appRateConfig.getIsTop();
+										String rate = appRateConfig.getRate();
+										String topPoundage = appRateConfig.getTopPoundage();// 封顶手续费
+										paymentAmount = pmsAppTransInfo.getFactamount();// 支付金额
+										String minPoundageStr = appRateConfig.getBottomPoundage();// 最低手续费
+										Double minPoundage = 0.0; // 附加费
+
+										if (StringUtils.isNotBlank(appRateConfig.getIsBottom())
+												&& appRateConfig.getIsBottom().equals("1")) {// 是否有清算费用，"1":有，“0”无
+											if (StringUtils.isNotBlank(minPoundageStr)) {
+												minPoundage = Double.parseDouble(minPoundageStr); // 清算手续费
+											} else {
+												// 若查到的是空值，直接返回错误
+												logger.info("没有查到相关费率附加费（最低手续费）：" + merchantinfo.getMobilephone());
+												return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
+											}
+										}
+
+										BigDecimal payAmount = new BigDecimal("0");
+										BigDecimal dfactAmount = new BigDecimal(pmsAppTransInfo.getFactamount());
+										// 费率
+										BigDecimal fee = new BigDecimal(0);
+										Double settleFee = 0.0;
+										Double userfee = 0.0;
+										String rateStr = "";
+										// Double payfee = null;
+										// 计算结算金额
+										if ("1".equals(isTop)) {
+
+											rateStr = rate + "-" + topPoundage;
+											// 是封顶费率类型
+											fee = new BigDecimal(rate).multiply(dfactAmount);
+
+											if (fee.compareTo(new BigDecimal(topPoundage)) == 1) {
+												// 手续费大于封顶金额，按封顶金额处理
+												payAmount = dfactAmount.subtract(new BigDecimal(topPoundage)
+														.subtract(new BigDecimal(minPoundage)));
+												fee = new BigDecimal(topPoundage).add(new BigDecimal(minPoundage));
+											} else {
+												// 按当前费率处理
+												rateStr = rate;
+												fee.add(new BigDecimal(minPoundage));
+												payAmount = dfactAmount.subtract(fee);
+											}
+
+										} else {
+											// 按当前费率处理
+											double dfpag = Double.parseDouble(merchantinfo.getPoundage());
+											double daifu = Double.parseDouble(merchantinfo.getCounter());
+											if (!"".equals(originalinfo.getV_userFee())
+													&& originalinfo.getV_userFee() != null) {
+												userfee = Double.parseDouble(originalinfo.getV_userFee());
+											}
+
+											if (!"".equals(originalinfo.getV_settleUserFee())
+													&& originalinfo.getV_settleUserFee() != null) {
+												settleFee = Double.parseDouble(originalinfo.getV_settleUserFee());
+											}
+											if (originalinfo.getV_type().equals("1")) {
+												// 按当前费率处理
+												rateStr = rate;
+												if (Double.parseDouble(rateStr) <= userfee) {
+													BigDecimal num = dfactAmount.multiply(new BigDecimal(userfee));
+													if (num.doubleValue() / 100 >= daifu) {
+														fee = num;
+													} else {
+														fee = new BigDecimal(daifu * 100);
 													}
-													// 判断入金是否开启
-													if ("1".equals(pmsBusinessPos.getOutPay())) {
-														retMap.put("v_code", "19");
-														retMap.put("v_msg", "入金未开通,请联系业务经理!");
-														return retMap;
-													}
-													// 校验欧单金额限制
-													ResultInfo payCheckResult = iPublicTradeVerifyService.amountVerifyOagent(
-															(int) Double.parseDouble(factAmount), TradeTypeEnum.merchantCollect, oAgentNo);
-													if (!payCheckResult.getErrCode().equals("0")) {
-														// 交易不支持
-														logger.info(
-																"欧单金额限制，oAagentNo:" + oAgentNo + ",payType:" + PaymentCodeEnum.moBaoQuickPay.getTypeCode());
-														return setResp("05", "欧单金额限制，请重试或联系客服");
+													rateStr = userfee.toString();
+													payAmount = dfactAmount.subtract(fee);
+													logger.info("清算金额:" + paymentAmount);
+													if (payAmount.doubleValue() < 0) {
+														payAmount = new BigDecimal(0.00);
 													}
 
-													// 校验欧单模块是否开启
-													ResultInfo resultInfoForOAgentNo = iPublicTradeVerifyService
-															.moduleVerifyOagent(TradeTypeEnum.merchantCollect, oAgentNo);
-													if (!resultInfoForOAgentNo.getErrCode().equals("0")) {
-														// 交易不支持
-														if (StringUtils.isEmpty(resultInfoForOAgentNo.getMsg())) {
-															logger.error("交易关闭，请重试或联系客服");
-															return setResp("06", "交易关闭，请重试或联系客服");
+												} else {
+													logger.info("费率低于成本费率：" + merchantinfo.getMercId());
+													return setResp("12", "费率低于成本费率");
+												}
+											} else if (originalinfo.getV_type().equals("0")) {
+
+												// 按当前费率处理
+												rateStr = rate;
+												if (Double.parseDouble(rateStr) <= userfee) {
+													fee = new BigDecimal(userfee).multiply(dfactAmount)
+															.add(new BigDecimal(minPoundage));
+												} else {
+													logger.info("费率低于成本费率：" + merchantinfo.getMercId());
+													return setResp("12", "费率低于成本费率");
+
+												}
+												if ("10044".equals(pmsBusinessPos.getBusinessnum())) {
+													if (dfpag > settleFee) {
+														logger.info("手续费低于最小手续费：" + merchantinfo.getMercId());
+														return setResp("20", "手续费低于最小手续费");
+													}
+
+												} else {
+
+													if (dfpag > settleFee) {
+														settleFee = dfpag;
+													}
+												}
+												switch (pmsBusinessPos.getBusinessnum()) {
+
+												case "1711030001":// 沈阳银盛
+													payAmount = dfactAmount.subtract(fee).subtract(new BigDecimal(100));
+													fee = fee.add(new BigDecimal(100));
+													break;
+												case "88882017092010001121":// 赢酷快捷
+													payAmount = dfactAmount.subtract(fee).subtract(new BigDecimal(20));
+													fee = fee.add(new BigDecimal(20));
+													break;
+												default:
+													/*
+													 * payAmount = dfactAmount.subtract(fee) .subtract(new
+													 * BigDecimal(settleFee).multiply(new BigDecimal(100))); fee =
+													 * fee.add(new BigDecimal(settleFee).multiply(new BigDecimal(100)));
+													 */
+													BigDecimal num = dfactAmount.multiply(new BigDecimal(userfee));
+													if (num.doubleValue() / 100 >= daifu) {
+														fee = num;
+													} else {
+														fee = new BigDecimal(daifu * 100);
+													}
+													rateStr = userfee.toString();
+													payAmount = dfactAmount.subtract(fee);
+													logger.info("清算金额:" + paymentAmount);
+													if (payAmount.doubleValue() < 0) {
+														payAmount = new BigDecimal(0.00);
+													}
+													break;
+
+												}
+												logger.info("清算金额:" + paymentAmount);
+												if (payAmount.doubleValue() < 0) {
+													payAmount = new BigDecimal(0.00);
+												}
+											}
+										}
+
+										// 设置结算金额
+										pmsAppTransInfo.setPayamount(payAmount.toString());// 结算金额
+										pmsAppTransInfo.setRate(rateStr);// 0.50_35 || 0.50
+										pmsAppTransInfo.setPoundage(fee.toString());
+										pmsAppTransInfo.setDrawMoneyType("1");// 普通提款
+										// 转换double为int
+										Integer paymentAmountInt = (int) Double.parseDouble(paymentAmount);
+
+										// 验证支付方式是否开启
+										payCheckResult = iPublicTradeVerifyService.totalVerify(paymentAmountInt,
+												TradeTypeEnum.merchantCollect, PaymentCodeEnum.moBaoQuickPay, oAgentNo,
+												merchantinfo.getMercId());
+										if (!payCheckResult.getErrCode().equals("0")) {
+											// 交易不支持
+
+											logger.info("不支持的支付方式，oAagentNo:" + oAgentNo + ",payType:"
+													+ PaymentCodeEnum.moBaoQuickPay.getTypeCode());
+											return setResp("13", "暂不支持该交易方式");
+										}
+										// 查看当前交易是否已经生成了流水表
+										PospTransInfo pospTransInfo = null;
+										// 流水表是否需要更新的标记 0 insert，1：update
+										int insertOrUpdateFlag = 0;
+										// 生成上送流水号
+										String transOrderId = generateTransOrderId(TradeTypeEnum.merchantCollect,
+												PaymentCodeEnum.moBaoQuickPay);
+										if ((pospTransInfo = pospTransInfoDAO
+												.searchByOrderId(pmsAppTransInfo.getOrderid())) != null) {
+											// 已经存在，修改流水号，设置pospsn为空
+											logger.info("订单号：" + pmsAppTransInfo.getOrderid() + ",生成上送通道的流水号："
+													+ transOrderId);
+											pospTransInfo.setTransOrderId(originalinfo.getV_oid());
+											pospTransInfo.setResponsecode("99");
+											pospTransInfo.setPospsn("");
+											insertOrUpdateFlag = 1;
+										} else {
+											// 不存在流水，生成一个流水
+											pospTransInfo = generateTransFromAppTrans(pmsAppTransInfo);
+
+											System.out.println("流水表生成的时间:" + pospTransInfo.getSenddate());
+											// 设置上送流水号
+											pospTransInfo.setTransOrderId(originalinfo.getV_oid());
+											insertOrUpdateFlag = 0;
+										}
+										// 插入流水表信息
+										if (insertOrUpdateFlag == 0) {
+											// 插入一条流水
+											pospTransInfoDAO.insert(pospTransInfo);
+										} else if (insertOrUpdateFlag == 1) {
+											// 更新一条流水
+											pospTransInfoDAO.updateByOrderId(pospTransInfo);
+										}
+										logger.info("修改订单信息");
+										logger.info(pmsAppTransInfo);
+										insertProfit(originalinfo.getV_oid(), originalinfo.getV_txnAmt(), merchantinfo,
+												PaymentCodeEnum.moBaoQuickPay.getTypeName(), originalinfo.getV_type());
+										int num = pmsAppTransInfoDao.update(pmsAppTransInfo);
+										if (num > 0) {
+
+											logger.info("上游通道商户号:" + pmsBusinessPos.getChannelnum());
+											// 商户号码
+											String merId = pmsBusinessPos.getBusinessnum();// 818310048160000
+											// 商户号私钥
+											String merKey = pmsBusinessPos.getKek();
+											PayBankInfo bank = new PayBankInfo();
+											bank.setBank_pmsbankNo(originalinfo.getV_settlePmsBankNo());
+											bank = payBankInfoDao.selectByBankInfo(bank);
+											logger.info("查询结算商户银行信息:" + bank);
+											PayBankInfo bank2 = new PayBankInfo();
+											bank2.setBank_pmsbankNo(originalinfo.getV_pmsBankNo());
+											bank2 = payBankInfoDao.selectByBankInfo(bank2);
+											logger.info("查询交易商户银行信息:" + bank2);
+											int number = 0;
+											String url = "";
+											String sign = "";
+											JSONObject json;
+											Calendar now = Calendar.getInstance();
+											String minute = "";
+											String month = "";
+											SmsBalanceRequest smsBalanceRequest;
+											SmsBalanceResponse smsVarableResponse;
+											switch (pmsBusinessPos.getChannelnum()) {
+											/*
+											 * case "936640995770001": // 摩宝快捷收银台 case "936640995770002": // 摩宝快捷银联界面
+											 * case "88882017092010001121": // 赢酷快捷 case "000000003":// 易生快捷 case
+											 * "1120180427134034001":// 银生宝快捷
+											 */
+
+											case "MBXHF":
+											case "YK":
+											case "YSKJ":
+											case "YSB":
+												if ("936640995770000".equals(pmsBusinessPos.getBusinessnum())) {
+													Map<String, String> transmap = new LinkedHashMap<String, String>();
+													transmap.put("versionId", "001"); // 版本号 固定
+													transmap.put("businessType", "1401"); // 预交易 1401
+													transmap.put("merId", "936640995770000"); // 商户号
+													transmap.put("orderId", originalinfo.getV_oid()); // 订单号
+													transmap.put("transDate", originalinfo.getV_time()); // 时间
+																											// yymmddhhmmss
+													transmap.put("transAmount", originalinfo.getV_txnAmt()); // 金额
+																												// 单位元，对于正式商户最低支付金额为10元
+													transmap.put("cardByName", MD5Util
+															.encode(originalinfo.getV_realName().getBytes("UTF-8"))); // 此处的MD5util为Base64加密
+													transmap.put("cardByNo", originalinfo.getV_cardNo()); // 卡号
+													if ("1".equals(originalinfo.getV_accountType())) {
+														transmap.put("cardType", "01"); // 卡类型01借记卡
+
+													} else if ("2".equals(originalinfo.getV_accountType())) {
+
+														transmap.put("cardType", "00"); // 卡类型00贷记卡
+														transmap.put("expireDate", originalinfo.getV_expired()); // 有效期
+														transmap.put("CVV", originalinfo.getV_cvn2()); // CVN
+													}
+													// transmap.put("bankCode",mbReqest.getBankCode()); //可为空 银行代码
+													// transmap.put("openBankName",mbReqest.getOpenBankName());//可为空
+													// 银行代码
+													transmap.put("cerType", "01"); // 证件类型 01 身份证
+													transmap.put("cerNumber", originalinfo.getV_cert_no());// 身份证
+													transmap.put("mobile", originalinfo.getV_phone()); // 手机号
+													transmap.put("isAcceptYzm", "00"); // 默认00
+													transmap.put("backNotifyUrl", MBUtil.notifyUrl);
+													transmap.put("instalTransFlag", "01"); // 分期标志
+													// 需要加密的字符串
+													String signstr = EncodeUtil.getUrlStr(transmap);
+													logger.info("需要签名的明文" + signstr);
+													String signtrue = MD5Util.MD5Encode(signstr + merKey);
+													transmap.put("signType", "MD5");
+													transmap.put("signData", signtrue);
+													// AES加密
+													String transUrlStr = EncodeUtil.getUrlStr(transmap);
+													//
+													String transData = AESUtil.encrypt(transUrlStr, merKey);
+													// 生产地址
+													String testUrl = MBUtil.quick;
+													String str = DemoBase.requestBody(merId, transData, testUrl);
+													// 获取交易返回结果
+													logger.info(str);
+													ObjectMapper om = new ObjectMapper();
+													Map<String, String> maps = new HashMap<>();
+													maps = om.readValue(str, Map.class);
+													retMap.put("v_mid", originalinfo.getV_mid());
+													retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+													retMap.put("v_time", originalinfo.getV_time());
+													retMap.put("v_oid", originalinfo.getV_oid());
+													if ("00".equals(maps.get("status"))) {
+														if ("01".equals(maps.get("refCode"))) {
+															OriginalOrderInfo info = new OriginalOrderInfo();
+															info.setMerchantOrderId(maps.get("ksPayOrderId"));
+															info.setOrderId(originalinfo.getV_oid());
+															number = originalDao.update(info);
+															retMap.put("v_code", "00");
+															retMap.put("v_msg", "请求成功");
+														} else if ("02".equals(maps.get("refCode"))) {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
 														} else {
-															return setResp("07", "系统异常，请重试或联系客服");
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
 														}
-
+													} else if ("01".equals(maps.get("status"))) {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													} else if ("02".equals(maps.get("status"))) {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
 													}
-													// 校验商户模块是否开启
-													ResultInfo payCheckResult3 = iPublicTradeVerifyService.moduelVerifyMer(TradeTypeEnum.merchantCollect,
-															mercId);
-													if (!payCheckResult3.getErrCode().equals("0")) {
-														// 交易不支持
-														logger.info(
-																"商户模块限制，oAagentNo:" + oAgentNo + ",payType:" + PaymentCodeEnum.moBaoQuickPay.getTypeCode());
-														return setResp("08", "商户模块限制,请重试或联系客服");
+												} else if ("000000001".equals(pmsBusinessPos.getBusinessnum())) {
+													String channelKey = YSUtil.channelKey;
+													String channel_sign_method = "SHA256";
+													Map<String, Object> reqMap = new TreeMap<String, Object>();
+													reqMap.put("sp_id", YSUtil.sp_id);// 服务商号
+													reqMap.put("mch_id", YSUtil.merId2);// 商户号
+													reqMap.put("out_trade_no", originalinfo.getV_oid());
+													reqMap.put("id_type", "01");
+													reqMap.put("acc_name", originalinfo.getV_realName());// 持卡人姓名
+													reqMap.put("acc_type", "PERSONNEL");// PERSONNEL：对私 CORPORATE：对公
+													reqMap.put("in_acc_no", originalinfo.getV_settleCardNo());// 卡号
+													reqMap.put("mobile", originalinfo.getV_phone());// 手机号
+													reqMap.put("id_no", originalinfo.getV_cert_no());// 证件号
+													reqMap.put("settle_rate", originalinfo.getV_settleUserFee());// 结算费率
+													reqMap.put("extra_rate", originalinfo.getV_userFee());// T0费率
+													Date t = new Date();
+													java.util.Calendar cal = java.util.Calendar.getInstance();
+													cal.setTime(t);
+													long sys_timestamp = cal.getTimeInMillis();
+													reqMap.put("timestamp", sys_timestamp);// 时间戳
+
+													StringBuilder sb = new StringBuilder();
+													Set<String> keySet = reqMap.keySet();
+													Iterator<String> iter = keySet.iterator();
+													while (iter.hasNext()) {
+														String key = iter.next();
+														sb.append(key);
+														sb.append("=");
+														sb.append(reqMap.get(key));
+														sb.append("&");
 													}
-													// 校验商户金额限制
-													Map<String, String> paramMap = new HashMap<String, String>();
-													paramMap.put("mercid", merchantinfo.getMercId());// 商户编号
-													paramMap.put("businesscode", TradeTypeEnum.merchantCollect.getTypeCode());// 业务编号
-													paramMap.put("oAgentNo", oAgentNo);
-													// 商户 网购 业务信息
-													Map<String, String> resultMap = merchantMineDao.queryBusinessInfo(paramMap);
+													sign = SwpHashUtil.getSign(sb.toString() + "key=" + channelKey,
+															channelKey, channel_sign_method);
+													reqMap.put("sign", sign);
 
-													if (resultMap == null || resultMap.size() == 0) {
-														// 若查到的是空值，直接返回错误
-														logger.info("没有查到相关费率配置：" + merchantinfo.getMobilephone());
-														return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
-													}
+													sb.append("sign");
+													sb.append("=");
+													sb.append(sign);
+													System.out.println(sb.toString());
+													url = YSUtil.url + "/swp/up/settlecheck.do";
+													HttpResponse httpResponse = HttpUtils.doPost(url, "", sb.toString(),
+															"application/x-www-form-urlencoded; charset=UTF-8");
+													String resp = EntityUtils.toString(httpResponse.getEntity());
+													System.out.println("接受请求:" + resp);
+													json = JSONObject.parseObject(resp);
 
-													String maxTransMoney = resultMap.get("MAX_AMOUNT"); // 每笔最大交易金额
-													String minTransMoney = resultMap.get("MIN_AMOUNT"); // 每笔最小交易金额
-													String paymentAmount = factAmount;// 交易金额
+													if ("SUCCESS".equals(json.getString("status"))) {
+														if ("SUCCESS".equals(json.getString("trade_state"))) {
+															PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
+															merchartInfo.setAccount(json.getString("sub_mch_id"));// 账号
+															merchartInfo.setMerchartId(originalinfo.getV_mid());
+															merchartInfo
+																	.setMerchartName(merchantList.get(0).getMercName());
+															merchartInfo.setMerchartNameSort(
+																	merchantList.get(0).getShortname());
+															merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
+															merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
+															merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
+															merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
+															// merchartInfo.setAccountType(payRequest.getBusinessType());//账户类型
+															merchartInfo.setBankName(bank2.getBank_name());// 开户行
+															merchartInfo.setPmsBankNo(originalinfo.getV_pmsBankNo());// 联行号
+															merchartInfo.setProvince(bank2.getBank_province());// 省份
+															merchartInfo.setCity(bank2.getBank_city());// 城市
+															merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
+															// merchartInfo.setWithdrawDepositSingleFee(payRequest.getWithdrawDepositSingleFee());//提现单笔手续费
+															merchartInfo.setoAgentNo("100333");
+															merchartInfo.setRateCode(originalinfo.getV_mid());
+															int i = weixinService.updateRegister(merchartInfo);
+															logger.info("易生修改状态:" + i);
+															if (i > 0) {
+																channelKey = YSUtil.channelKey;
+																channel_sign_method = "SHA256";
+																reqMap.put("sp_id", YSUtil.sp_id);// 服务商号
+																reqMap.put("mch_id", YSUtil.merId2);// 商户号
+																reqMap.put("out_trade_no", originalinfo.getV_oid());
+																reqMap.put("id_type", "01");
+																reqMap.put("sub_mch_id", json.getString("sub_mch_id"));
+																reqMap.put("acc_name", originalinfo.getV_realName());// 持卡人姓名
+																reqMap.put("cvn2", originalinfo.getV_cvn2());//
+																reqMap.put("expired", originalinfo.getV_expired());
+																reqMap.put("acc_no", originalinfo.getV_cardNo());// 卡号
+																reqMap.put("bankcode", bank2.getBank_code());// 银行代码
+																reqMap.put("mobile", originalinfo.getV_phone());// 手机号
+																reqMap.put("id_no", originalinfo.getV_cert_no());// 证件号
+																t = new Date();
+																cal = java.util.Calendar.getInstance();
+																cal.setTime(t);
+																sys_timestamp = cal.getTimeInMillis();
+																reqMap.put("timestamp", sys_timestamp);// 时间戳
 
-													if (new BigDecimal(paymentAmount).compareTo(new BigDecimal(maxTransMoney)) == 1) {
-														// 金额超过最大金额
-														logger.info("交易金额大于最打金额");
-														return setResp("10", "金额超过最大交易金额");
-													} else if (new BigDecimal(paymentAmount).compareTo(new BigDecimal(minTransMoney)) == -1) {
-														// 金额小于最小金额
-														logger.info("交易金额小于最小金额");
-														return setResp("11", "交易金额小于最小金额");
-
-													}
-
-													// 组装订单数据
-													PmsAppTransInfo pmsAppTransInfo = new PmsAppTransInfo();
-													// 写入欧单编号
-													pmsAppTransInfo.setoAgentNo(oAgentNo);
-													pmsAppTransInfo.setStatus(OrderStatusEnum.initlize.getStatus());// 订单初始化状态
-													pmsAppTransInfo.setTradetype(TradeTypeEnum.merchantCollect.getTypeName());// 业务功能模块名称
-													pmsAppTransInfo.setTradetime(UtilDate.getDateFormatter()); // 设置时间
-													pmsAppTransInfo.setMercid(merchantinfo.getMercId());
-													pmsAppTransInfo.setTradetypecode(TradeTypeEnum.merchantCollect.getTypeCode());// 业务功能模块编号
-													// ：17
-													pmsAppTransInfo.setOrderid(originalinfo.getV_oid());// 设置订单号
-													pmsAppTransInfo.setPaymenttype(PaymentCodeEnum.moBaoQuickPay.getTypeName());
-													pmsAppTransInfo.setPaymentcode(PaymentCodeEnum.moBaoQuickPay.getTypeCode());
-													BigDecimal factBigDecimal = new BigDecimal(factAmount);
-													BigDecimal orderAmountBigDecimal = new BigDecimal(factAmount);
-													pmsAppTransInfo.setBusinessNum(pmsBusinessPos.getBusinessnum());
-													pmsAppTransInfo.setFactamount(factBigDecimal.stripTrailingZeros().toPlainString());// 实际金额
-													pmsAppTransInfo.setOrderamount(orderAmountBigDecimal.stripTrailingZeros().toPlainString());// 订单金额
-													pmsAppTransInfo.setDrawMoneyType("1");// 普通提款
-													if ("0".equals(originalinfo.getV_type())) {
-														pmsAppTransInfo.setSettlementState("D0");
-													}
-													if ("1".equals(originalinfo.getV_type())) {
-
-														pmsAppTransInfo.setSettlementState("T1");
-													}
-
-													// 插入订单信息
-													Integer insertAppTrans = pmsAppTransInfoDao.insert(pmsAppTransInfo);
-													if (insertAppTrans == 1) {
-
-														// 查询订单信息
-														pmsAppTransInfo = pmsAppTransInfoDao.searchOrderInfo(pmsAppTransInfo.getOrderid());
-
-														String quickRateType = resultMap.get("QUICKRATETYPE").toString();// 快捷支付费率类型
-
-														// 获取o单第三方支付的费率
-														AppRateConfig appRate = new AppRateConfig();
-														appRate.setRateType(quickRateType);
-														appRate.setoAgentNo(oAgentNo);
-														AppRateConfig appRateConfig = appRateConfigDao.getByRateTypeAndoAgentNo(appRate);
-
-														if (appRateConfig == null) {
-															// 若查到的是空值，直接返回错误
-															// 若查到的是空值，直接返回错误
-															logger.info("没有查到相关费率配置：" + merchantinfo.getMobilephone());
-															return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
-
-														}
-
-														String isTop = appRateConfig.getIsTop();
-														String rate = appRateConfig.getRate();
-														String topPoundage = appRateConfig.getTopPoundage();// 封顶手续费
-														paymentAmount = pmsAppTransInfo.getFactamount();// 支付金额
-														String minPoundageStr = appRateConfig.getBottomPoundage();// 最低手续费
-														Double minPoundage = 0.0; // 附加费
-
-														if (StringUtils.isNotBlank(appRateConfig.getIsBottom())
-																&& appRateConfig.getIsBottom().equals("1")) {// 是否有清算费用，"1":有，“0”无
-															if (StringUtils.isNotBlank(minPoundageStr)) {
-																minPoundage = Double.parseDouble(minPoundageStr); // 清算手续费
-															} else {
-																// 若查到的是空值，直接返回错误
-																logger.info("没有查到相关费率附加费（最低手续费）：" + merchantinfo.getMobilephone());
-																return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
-															}
-														}
-
-														BigDecimal payAmount = new BigDecimal("0");
-														BigDecimal dfactAmount = new BigDecimal(pmsAppTransInfo.getFactamount());
-														// 费率
-														BigDecimal fee = new BigDecimal(0);
-														Double settleFee = 0.0;
-														Double userfee = 0.0;
-														String rateStr = "";
-														// Double payfee = null;
-														// 计算结算金额
-														if ("1".equals(isTop)) {
-
-															rateStr = rate + "-" + topPoundage;
-															// 是封顶费率类型
-															fee = new BigDecimal(rate).multiply(dfactAmount);
-
-															if (fee.compareTo(new BigDecimal(topPoundage)) == 1) {
-																// 手续费大于封顶金额，按封顶金额处理
-																payAmount = dfactAmount
-																		.subtract(new BigDecimal(topPoundage).subtract(new BigDecimal(minPoundage)));
-																fee = new BigDecimal(topPoundage).add(new BigDecimal(minPoundage));
-															} else {
-																// 按当前费率处理
-																rateStr = rate;
-																fee.add(new BigDecimal(minPoundage));
-																payAmount = dfactAmount.subtract(fee);
-															}
-
-														} else {
-															// 按当前费率处理
-															double dfpag = Double.parseDouble(merchantinfo.getPoundage());
-															double daifu = Double.parseDouble(merchantinfo.getCounter());
-															if (!"".equals(originalinfo.getV_userFee()) && originalinfo.getV_userFee() != null) {
-																userfee = Double.parseDouble(originalinfo.getV_userFee());
-															}
-
-															if (!"".equals(originalinfo.getV_settleUserFee())
-																	&& originalinfo.getV_settleUserFee() != null) {
-																settleFee = Double.parseDouble(originalinfo.getV_settleUserFee());
-															}
-															if (originalinfo.getV_type().equals("1")) {
-																// 按当前费率处理
-																rateStr = rate;
-																if (Double.parseDouble(rateStr) <= userfee) {
-																	BigDecimal num = dfactAmount.multiply(new BigDecimal(userfee));
-																	if (num.doubleValue() / 100 >= daifu) {
-																		fee = num;
-																	} else {
-																		fee = new BigDecimal(daifu * 100);
-																	}
-																	rateStr = userfee.toString();
-																	payAmount = dfactAmount.subtract(fee);
-																	logger.info("清算金额:" + paymentAmount);
-																	if (payAmount.doubleValue() < 0) {
-																		payAmount = new BigDecimal(0.00);
-																	}
-
-																} else {
-																	logger.info("费率低于成本费率：" + merchantinfo.getMercId());
-																	return setResp("12", "费率低于成本费率");
-																}
-															} else if (originalinfo.getV_type().equals("0")) {
-
-																// 按当前费率处理
-																rateStr = rate;
-																if (Double.parseDouble(rateStr) <= userfee) {
-																	fee = new BigDecimal(userfee).multiply(dfactAmount).add(new BigDecimal(minPoundage));
-																} else {
-																	logger.info("费率低于成本费率：" + merchantinfo.getMercId());
-																	return setResp("12", "费率低于成本费率");
-
-																}
-																if ("10044".equals(pmsBusinessPos.getBusinessnum())) {
-																	if (dfpag > settleFee) {
-																		logger.info("手续费低于最小手续费：" + merchantinfo.getMercId());
-																		return setResp("20", "手续费低于最小手续费");
-																	}
-
-																} else {
-
-																	if (dfpag > settleFee) {
-																		settleFee = dfpag;
-																	}
-																}
-																switch (pmsBusinessPos.getBusinessnum()) {
-
-																case "1711030001":// 沈阳银盛
-																	payAmount = dfactAmount.subtract(fee).subtract(new BigDecimal(100));
-																	fee = fee.add(new BigDecimal(100));
-																	break;
-																case "88882017092010001121":// 赢酷快捷
-																	payAmount = dfactAmount.subtract(fee).subtract(new BigDecimal(20));
-																	fee = fee.add(new BigDecimal(20));
-																	break;
-																default:
-																	/*
-																	 * payAmount = dfactAmount.subtract(fee) .subtract(new
-																	 * BigDecimal(settleFee).multiply(new BigDecimal(100))); fee = fee.add(new
-																	 * BigDecimal(settleFee).multiply(new BigDecimal(100)));
-																	 */
-																	BigDecimal num = dfactAmount.multiply(new BigDecimal(userfee));
-																	if (num.doubleValue() / 100 >= daifu) {
-																		fee = num;
-																	} else {
-																		fee = new BigDecimal(daifu * 100);
-																	}
-																	rateStr = userfee.toString();
-																	payAmount = dfactAmount.subtract(fee);
-																	logger.info("清算金额:" + paymentAmount);
-																	if (payAmount.doubleValue() < 0) {
-																		payAmount = new BigDecimal(0.00);
-																	}
-																	break;
-
-																}
-																logger.info("清算金额:" + paymentAmount);
-																if (payAmount.doubleValue() < 0) {
-																	payAmount = new BigDecimal(0.00);
-																}
-															}
-														}
-														// 设置结算金额
-														pmsAppTransInfo.setPayamount(payAmount.toString());// 结算金额
-														pmsAppTransInfo.setRate(rateStr);// 0.50_35 || 0.50
-														pmsAppTransInfo.setPoundage(fee.toString());
-														pmsAppTransInfo.setDrawMoneyType("1");// 普通提款
-														// 转换double为int
-														Integer paymentAmountInt = (int) Double.parseDouble(paymentAmount);
-
-														// 验证支付方式是否开启
-														payCheckResult = iPublicTradeVerifyService.totalVerify(paymentAmountInt,
-																TradeTypeEnum.merchantCollect, PaymentCodeEnum.moBaoQuickPay, oAgentNo,
-																merchantinfo.getMercId());
-														if (!payCheckResult.getErrCode().equals("0")) {
-															// 交易不支持
-
-															logger.info("不支持的支付方式，oAagentNo:" + oAgentNo + ",payType:"
-																	+ PaymentCodeEnum.moBaoQuickPay.getTypeCode());
-															return setResp("13", "暂不支持该交易方式");
-														}
-														// 查看当前交易是否已经生成了流水表
-														PospTransInfo pospTransInfo = null;
-														// 流水表是否需要更新的标记 0 insert，1：update
-														int insertOrUpdateFlag = 0;
-														// 生成上送流水号
-														String transOrderId = generateTransOrderId(TradeTypeEnum.merchantCollect,
-																PaymentCodeEnum.moBaoQuickPay);
-														if ((pospTransInfo = pospTransInfoDAO.searchByOrderId(pmsAppTransInfo.getOrderid())) != null) {
-															// 已经存在，修改流水号，设置pospsn为空
-															logger.info("订单号：" + pmsAppTransInfo.getOrderid() + ",生成上送通道的流水号：" + transOrderId);
-															pospTransInfo.setTransOrderId(originalinfo.getV_oid());
-															pospTransInfo.setResponsecode("99");
-															pospTransInfo.setPospsn("");
-															insertOrUpdateFlag = 1;
-														} else {
-															// 不存在流水，生成一个流水
-															pospTransInfo = generateTransFromAppTrans(pmsAppTransInfo);
-
-															System.out.println("流水表生成的时间:" + pospTransInfo.getSenddate());
-															// 设置上送流水号
-															pospTransInfo.setTransOrderId(originalinfo.getV_oid());
-															insertOrUpdateFlag = 0;
-														}
-														// 插入流水表信息
-														if (insertOrUpdateFlag == 0) {
-															// 插入一条流水
-															pospTransInfoDAO.insert(pospTransInfo);
-														} else if (insertOrUpdateFlag == 1) {
-															// 更新一条流水
-															pospTransInfoDAO.updateByOrderId(pospTransInfo);
-														}
-														logger.info("修改订单信息");
-														logger.info(pmsAppTransInfo);
-														insertProfit(originalinfo.getV_oid(), originalinfo.getV_txnAmt(), merchantinfo,
-																PaymentCodeEnum.moBaoQuickPay.getTypeName(), originalinfo.getV_type());
-														int num = pmsAppTransInfoDao.update(pmsAppTransInfo);
-														if (num > 0) {
-
-															logger.info("上游通道商户号:" + pmsBusinessPos.getChannelnum());
-															// 商户号码
-															String merId = pmsBusinessPos.getBusinessnum();// 818310048160000
-															// 商户号私钥
-															String merKey = pmsBusinessPos.getKek();
-															PayBankInfo bank = new PayBankInfo();
-															bank.setBank_pmsbankNo(originalinfo.getV_settlePmsBankNo());
-															bank = payBankInfoDao.selectByBankInfo(bank);
-															logger.info("查询结算商户银行信息:" + bank);
-															PayBankInfo bank2 = new PayBankInfo();
-															bank2.setBank_pmsbankNo(originalinfo.getV_pmsBankNo());
-															bank2 = payBankInfoDao.selectByBankInfo(bank2);
-															logger.info("查询交易商户银行信息:" + bank2);
-															int number = 0;
-															String url = "";
-															String sign = "";
-															JSONObject json;
-															Calendar now = Calendar.getInstance();
-															String minute = "";
-															String month = "";
-															SmsBalanceRequest smsBalanceRequest;
-															SmsBalanceResponse smsVarableResponse;
-															switch (pmsBusinessPos.getChannelnum()) {
-															/*
-															 * case "936640995770001": // 摩宝快捷收银台 case "936640995770002": // 摩宝快捷银联界面 case
-															 * "88882017092010001121": // 赢酷快捷 case "000000003":// 易生快捷 case
-															 * "1120180427134034001":// 银生宝快捷
-															 */
-
-															case "MBXHF":
-															case "YK":
-															case "YSKJ":
-															case "YSB":
-																if ("936640995770000".equals(pmsBusinessPos.getBusinessnum())) {
-																	Map<String, String> transmap = new LinkedHashMap<String, String>();
-																	transmap.put("versionId", "001"); // 版本号 固定
-																	transmap.put("businessType", "1401"); // 预交易 1401
-																	transmap.put("merId", "936640995770000"); // 商户号
-																	transmap.put("orderId", originalinfo.getV_oid()); // 订单号
-																	transmap.put("transDate", originalinfo.getV_time()); // 时间 yymmddhhmmss
-																	transmap.put("transAmount", originalinfo.getV_txnAmt()); // 金额
-																																// 单位元，对于正式商户最低支付金额为10元
-																	transmap.put("cardByName",
-																			MD5Util.encode(originalinfo.getV_realName().getBytes("UTF-8"))); // 此处的MD5util为Base64加密
-																	transmap.put("cardByNo", originalinfo.getV_cardNo()); // 卡号
-																	if ("1".equals(originalinfo.getV_accountType())) {
-																		transmap.put("cardType", "01"); // 卡类型01借记卡
-
-																	} else if ("2".equals(originalinfo.getV_accountType())) {
-
-																		transmap.put("cardType", "00"); // 卡类型00贷记卡
-																		transmap.put("expireDate", originalinfo.getV_expired()); // 有效期
-																		transmap.put("CVV", originalinfo.getV_cvn2()); // CVN
-																	}
-																	// transmap.put("bankCode",mbReqest.getBankCode()); //可为空 银行代码
-																	// transmap.put("openBankName",mbReqest.getOpenBankName());//可为空 银行代码
-																	transmap.put("cerType", "01"); // 证件类型 01 身份证
-																	transmap.put("cerNumber", originalinfo.getV_cert_no());// 身份证
-																	transmap.put("mobile", originalinfo.getV_phone()); // 手机号
-																	transmap.put("isAcceptYzm", "00"); // 默认00
-																	transmap.put("backNotifyUrl", MBUtil.notifyUrl);
-																	transmap.put("instalTransFlag", "01"); // 分期标志
-																	// 需要加密的字符串
-																	String signstr = EncodeUtil.getUrlStr(transmap);
-																	logger.info("需要签名的明文" + signstr);
-																	String signtrue = MD5Util.MD5Encode(signstr + merKey);
-																	transmap.put("signType", "MD5");
-																	transmap.put("signData", signtrue);
-																	// AES加密
-																	String transUrlStr = EncodeUtil.getUrlStr(transmap);
-																	//
-																	String transData = AESUtil.encrypt(transUrlStr, merKey);
-																	// 生产地址
-																	String testUrl = MBUtil.quick;
-																	String str = DemoBase.requestBody(merId, transData, testUrl);
-																	// 获取交易返回结果
-																	logger.info(str);
-																	ObjectMapper om = new ObjectMapper();
-																	Map<String, String> maps = new HashMap<>();
-																	maps = om.readValue(str, Map.class);
-																	retMap.put("v_mid", originalinfo.getV_mid());
-																	retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																	retMap.put("v_time", originalinfo.getV_time());
-																	retMap.put("v_oid", originalinfo.getV_oid());
-																	if ("00".equals(maps.get("status"))) {
-																		if ("01".equals(maps.get("refCode"))) {
-																			OriginalOrderInfo info = new OriginalOrderInfo();
-																			info.setMerchantOrderId(maps.get("ksPayOrderId"));
-																			info.setOrderId(originalinfo.getV_oid());
-																			number = originalDao.update(info);
-																			retMap.put("v_code", "00");
-																			retMap.put("v_msg", "请求成功");
-																		} else if ("02".equals(maps.get("refCode"))) {
-																			retMap.put("v_code", "15");
-																			retMap.put("v_msg", "请求失败");
-																		} else {
-																			retMap.put("v_code", "15");
-																			retMap.put("v_msg", "请求失败");
-																		}
-																	} else if ("01".equals(maps.get("status"))) {
-																		retMap.put("v_code", "15");
-																		retMap.put("v_msg", "请求失败");
-																	} else if ("02".equals(maps.get("status"))) {
-																		retMap.put("v_code", "15");
-																		retMap.put("v_msg", "请求失败");
-																	}
-																} else if ("000000001".equals(pmsBusinessPos.getBusinessnum())) {
-																	String channelKey = YSUtil.channelKey;
-																	String channel_sign_method = "SHA256";
-																	Map<String, Object> reqMap = new TreeMap<String, Object>();
-																	reqMap.put("sp_id", YSUtil.sp_id);// 服务商号
-																	reqMap.put("mch_id", YSUtil.merId2);// 商户号
-																	reqMap.put("out_trade_no", originalinfo.getV_oid());
-																	reqMap.put("id_type", "01");
-																	reqMap.put("acc_name", originalinfo.getV_realName());// 持卡人姓名
-																	reqMap.put("acc_type", "PERSONNEL");// PERSONNEL：对私 CORPORATE：对公
-																	reqMap.put("in_acc_no", originalinfo.getV_settleCardNo());// 卡号
-																	reqMap.put("mobile", originalinfo.getV_phone());// 手机号
-																	reqMap.put("id_no", originalinfo.getV_cert_no());// 证件号
-																	reqMap.put("settle_rate", originalinfo.getV_settleUserFee());// 结算费率
-																	reqMap.put("extra_rate", originalinfo.getV_userFee());// T0费率
-																	Date t = new Date();
-																	java.util.Calendar cal = java.util.Calendar.getInstance();
-																	cal.setTime(t);
-																	long sys_timestamp = cal.getTimeInMillis();
-																	reqMap.put("timestamp", sys_timestamp);// 时间戳
-
-																	StringBuilder sb = new StringBuilder();
-																	Set<String> keySet = reqMap.keySet();
-																	Iterator<String> iter = keySet.iterator();
-																	while (iter.hasNext()) {
-																		String key = iter.next();
-																		sb.append(key);
-																		sb.append("=");
-																		sb.append(reqMap.get(key));
-																		sb.append("&");
-																	}
-																	sign = SwpHashUtil.getSign(sb.toString() + "key=" + channelKey, channelKey,
-																			channel_sign_method);
-																	reqMap.put("sign", sign);
-
-																	sb.append("sign");
+																sb = new StringBuilder();
+																keySet = reqMap.keySet();
+																iter = keySet.iterator();
+																while (iter.hasNext()) {
+																	String key = iter.next();
+																	sb.append(key);
 																	sb.append("=");
-																	sb.append(sign);
-																	System.out.println(sb.toString());
-																	url = YSUtil.url + "/swp/up/settlecheck.do";
-																	HttpResponse httpResponse = HttpUtils.doPost(url, "", sb.toString(),
-																			"application/x-www-form-urlencoded; charset=UTF-8");
-																	String resp = EntityUtils.toString(httpResponse.getEntity());
-																	System.out.println("接受请求:" + resp);
-																	json = JSONObject.parseObject(resp);
+																	sb.append(reqMap.get(key));
+																	sb.append("&");
+																}
+																sign = SwpHashUtil.getSign(
+																		sb.toString() + "key=" + channelKey, channelKey,
+																		channel_sign_method);
+																reqMap.put("sign", sign);
 
-																	if ("SUCCESS".equals(json.getString("status"))) {
-																		if ("SUCCESS".equals(json.getString("trade_state"))) {
-																			PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
-																			merchartInfo.setAccount(json.getString("sub_mch_id"));// 账号
-																			merchartInfo.setMerchartId(originalinfo.getV_mid());
-																			merchartInfo.setMerchartName(merchantList.get(0).getMercName());
-																			merchartInfo.setMerchartNameSort(merchantList.get(0).getShortname());
-																			merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
-																			merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
-																			merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
-																			merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
-																			// merchartInfo.setAccountType(payRequest.getBusinessType());//账户类型
-																			merchartInfo.setBankName(bank2.getBank_name());// 开户行
-																			merchartInfo.setPmsBankNo(originalinfo.getV_pmsBankNo());// 联行号
-																			merchartInfo.setProvince(bank2.getBank_province());// 省份
-																			merchartInfo.setCity(bank2.getBank_city());// 城市
-																			merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
-																			// merchartInfo.setWithdrawDepositSingleFee(payRequest.getWithdrawDepositSingleFee());//提现单笔手续费
-																			merchartInfo.setoAgentNo("100333");
-																			merchartInfo.setRateCode(originalinfo.getV_mid());
-																			int i = weixinService.updateRegister(merchartInfo);
-																			logger.info("易生修改状态:" + i);
-																			if (i > 0) {
-																				channelKey = YSUtil.channelKey;
-																				channel_sign_method = "SHA256";
-																				reqMap.put("sp_id", YSUtil.sp_id);// 服务商号
-																				reqMap.put("mch_id", YSUtil.merId2);// 商户号
-																				reqMap.put("out_trade_no", originalinfo.getV_oid());
-																				reqMap.put("id_type", "01");
-																				reqMap.put("sub_mch_id", json.getString("sub_mch_id"));
-																				reqMap.put("acc_name", originalinfo.getV_realName());// 持卡人姓名
-																				reqMap.put("cvn2", originalinfo.getV_cvn2());//
-																				reqMap.put("expired", originalinfo.getV_expired());
-																				reqMap.put("acc_no", originalinfo.getV_cardNo());// 卡号
-																				reqMap.put("bankcode", bank2.getBank_code());// 银行代码
-																				reqMap.put("mobile", originalinfo.getV_phone());// 手机号
-																				reqMap.put("id_no", originalinfo.getV_cert_no());// 证件号
-																				t = new Date();
-																				cal = java.util.Calendar.getInstance();
-																				cal.setTime(t);
-																				sys_timestamp = cal.getTimeInMillis();
-																				reqMap.put("timestamp", sys_timestamp);// 时间戳
+																sb.append("sign");
+																sb.append("=");
+																sb.append(sign);
+																System.out.println(sb.toString());
+																url = YSUtil.url + "/swp/up/bindCardBack.do";
+																httpResponse = HttpUtils.doPost(url, "", sb.toString(),
+																		"application/x-www-form-urlencoded; charset=UTF-8");
+																resp = EntityUtils.toString(httpResponse.getEntity());
+																System.out.println("接受请求:" + resp);
+																json = JSONObject.parseObject(resp);
 
-																				sb = new StringBuilder();
-																				keySet = reqMap.keySet();
-																				iter = keySet.iterator();
-																				while (iter.hasNext()) {
-																					String key = iter.next();
-																					sb.append(key);
-																					sb.append("=");
-																					sb.append(reqMap.get(key));
-																					sb.append("&");
-																				}
-																				sign = SwpHashUtil.getSign(sb.toString() + "key=" + channelKey, channelKey,
-																						channel_sign_method);
-																				reqMap.put("sign", sign);
+																if ("SUCCESS".equals(json.getString("status"))) {
+																	if ("SUCCESS"
+																			.equals(json.getString("trade_state"))) {
+																		PmsDaifuMerchantInfo model = new PmsDaifuMerchantInfo();
+																		model.setMercId(originalinfo.getV_mid());
+																		model.setBatchNo(originalinfo.getV_oid());
+																		model.setIdentity(json.getString("swpaccid"));
+																		model.setCardno(originalinfo.getV_cardNo());
+																		model.setRealname(originalinfo.getV_realName());
+																		model.setPmsbankno(
+																				json.getString("trade_state_desc"));
+																		model.setTransactionType("快捷绑卡");
+																		model.setOagentno("100333");
+																		model.setResponsecode("00");
+																		i = pmsDaifuMerchantInfoDao.insert(model);
+																		if (i > 0) {
+																			logger.info("插入鉴权订单成功！！");
+																			channelKey = YSUtil.channelKey;
+																			channel_sign_method = "SHA256";
+																			Map<String, Object> reqMap1 = new TreeMap<String, Object>();
+																			reqMap1.put("sp_id", YSUtil.sp_id);
+																			reqMap1.put("mch_id",
+																					pmsBusinessPos.getBusinessnum());// 商户号YSUtil.merId1
+																			reqMap1.put("out_trade_no",
+																					originalinfo.getV_oid());
+																			reqMap1.put("swpaccid",
+																					json.getString("swpaccid"));
+																			Double amount = Double.parseDouble(
+																					originalinfo.getV_txnAmt()) * 100;
+																			reqMap1.put("total_fee", amount.toString());
+																			t = new Date();
+																			cal = java.util.Calendar.getInstance();
+																			cal.setTime(t);
+																			sys_timestamp = cal.getTimeInMillis();
+																			reqMap1.put("timestamp", sys_timestamp);
 
-																				sb.append("sign");
-																				sb.append("=");
-																				sb.append(sign);
-																				System.out.println(sb.toString());
-																				url = YSUtil.url + "/swp/up/bindCardBack.do";
-																				httpResponse = HttpUtils.doPost(url, "", sb.toString(),
-																						"application/x-www-form-urlencoded; charset=UTF-8");
-																				resp = EntityUtils.toString(httpResponse.getEntity());
-																				System.out.println("接受请求:" + resp);
-																				json = JSONObject.parseObject(resp);
+																			StringBuilder sb1 = new StringBuilder();
+																			keySet = reqMap.keySet();
+																			iter = keySet.iterator();
+																			while (iter.hasNext()) {
+																				String key = iter.next();
+																				sb1.append(key);
+																				sb1.append("=");
+																				sb1.append(reqMap.get(key));
+																				sb1.append("&");
+																			}
+																			sign = SwpHashUtil.getSign(
+																					sb1.toString() + "key="
+																							+ channelKey,
+																					channelKey, channel_sign_method);
+																			reqMap1.put("sign", sign);
 
-																				if ("SUCCESS".equals(json.getString("status"))) {
-																					if ("SUCCESS".equals(json.getString("trade_state"))) {
-																						PmsDaifuMerchantInfo model = new PmsDaifuMerchantInfo();
-																						model.setMercId(originalinfo.getV_mid());
-																						model.setBatchNo(originalinfo.getV_oid());
-																						model.setIdentity(json.getString("swpaccid"));
-																						model.setCardno(originalinfo.getV_cardNo());
-																						model.setRealname(originalinfo.getV_realName());
-																						model.setPmsbankno(json.getString("trade_state_desc"));
-																						model.setTransactionType("快捷绑卡");
-																						model.setOagentno("100333");
-																						model.setResponsecode("00");
-																						i = pmsDaifuMerchantInfoDao.insert(model);
-																						if (i > 0) {
-																							logger.info("插入鉴权订单成功！！");
-																							channelKey = YSUtil.channelKey;
-																							channel_sign_method = "SHA256";
-																							Map<String, Object> reqMap1 = new TreeMap<String, Object>();
-																							reqMap1.put("sp_id", YSUtil.sp_id);
-																							reqMap1.put("mch_id", pmsBusinessPos.getBusinessnum());// 商户号YSUtil.merId1
-																							reqMap1.put("out_trade_no", originalinfo.getV_oid());
-																							reqMap1.put("swpaccid", json.getString("swpaccid"));
-																							Double amount = Double.parseDouble(originalinfo.getV_txnAmt())
-																									* 100;
-																							reqMap1.put("total_fee", amount.toString());
-																							t = new Date();
-																							cal = java.util.Calendar.getInstance();
-																							cal.setTime(t);
-																							sys_timestamp = cal.getTimeInMillis();
-																							reqMap1.put("timestamp", sys_timestamp);
-
-																							StringBuilder sb1 = new StringBuilder();
-																							keySet = reqMap.keySet();
-																							iter = keySet.iterator();
-																							while (iter.hasNext()) {
-																								String key = iter.next();
-																								sb1.append(key);
-																								sb1.append("=");
-																								sb1.append(reqMap.get(key));
-																								sb1.append("&");
-																							}
-																							sign = SwpHashUtil.getSign(sb1.toString() + "key=" + channelKey,
-																									channelKey, channel_sign_method);
-																							reqMap1.put("sign", sign);
-
-																							sb1.append("sign");
-																							sb1.append("=");
-																							sb1.append(sign);
-																							logger.info("签名串:" + sb1.toString());
-																							url = YSUtil.url + "/swp/up/sms.do";
-																							httpResponse = HttpUtils.doPost(url, "", sb.toString(),
-																									"application/x-www-form-urlencoded; charset=UTF-8");
-																							resp = EntityUtils.toString(httpResponse.getEntity());
-																							logger.info("接受请求:" + resp);
-																							json = JSONObject.parseObject(resp);
-																							if ("SUCCESS".equals(json.getString("status"))) {
-																								if ("SUCCESS".equals(json.getString("trade_state"))) {
-																									OriginalOrderInfo info = new OriginalOrderInfo();
-																									info.setOrderId(originalinfo.getV_oid());
-																									info.setMerchantOrderId(json.getString("sys_trade_no"));
-																									;
-																									number = originalDao.update(info);
-																									if (number > 0) {
-																										retMap.put("v_mid", originalinfo.getV_mid());
-																										retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																										retMap.put("v_time", originalinfo.getV_time());
-																										retMap.put("v_code", "00");
-																										retMap.put("v_msg", "请求成功");
-																										retMap.put("v_oid", originalinfo.getV_oid());
-																									}
-
-																								} else {
-																									retMap.put("v_code", "15");
-																									retMap.put("v_msg", "请求失败");
-																									return retMap;
-																								}
-																							} else {
-																								retMap.put("v_code", "15");
-																								retMap.put("v_msg", "请求失败");
-																								return retMap;
-																							}
-																						}
-																					} else {
-																						retMap.put("v_code", "15");
-																						retMap.put("v_msg", "请求失败");
-																						return retMap;
+																			sb1.append("sign");
+																			sb1.append("=");
+																			sb1.append(sign);
+																			logger.info("签名串:" + sb1.toString());
+																			url = YSUtil.url + "/swp/up/sms.do";
+																			httpResponse = HttpUtils.doPost(url, "",
+																					sb.toString(),
+																					"application/x-www-form-urlencoded; charset=UTF-8");
+																			resp = EntityUtils
+																					.toString(httpResponse.getEntity());
+																			logger.info("接受请求:" + resp);
+																			json = JSONObject.parseObject(resp);
+																			if ("SUCCESS"
+																					.equals(json.getString("status"))) {
+																				if ("SUCCESS".equals(json
+																						.getString("trade_state"))) {
+																					OriginalOrderInfo info = new OriginalOrderInfo();
+																					info.setOrderId(
+																							originalinfo.getV_oid());
+																					info.setMerchantOrderId(json
+																							.getString("sys_trade_no"));
+																					;
+																					number = originalDao.update(info);
+																					if (number > 0) {
+																						retMap.put("v_mid", originalinfo
+																								.getV_mid());
+																						retMap.put("v_txnAmt",
+																								originalinfo
+																										.getV_txnAmt());
+																						retMap.put("v_time",
+																								originalinfo
+																										.getV_time());
+																						retMap.put("v_code", "00");
+																						retMap.put("v_msg", "请求成功");
+																						retMap.put("v_oid", originalinfo
+																								.getV_oid());
 																					}
+
 																				} else {
 																					retMap.put("v_code", "15");
 																					retMap.put("v_msg", "请求失败");
 																					return retMap;
 																				}
-
+																			} else {
+																				retMap.put("v_code", "15");
+																				retMap.put("v_msg", "请求失败");
+																				return retMap;
 																			}
-																		} else {
-																			retMap.put("v_code", "15");
-																			retMap.put("v_msg", "请求失败");
-																			return retMap;
 																		}
 																	} else {
 																		retMap.put("v_code", "15");
 																		retMap.put("v_msg", "请求失败");
 																		return retMap;
-																	}
-																} else {
-																	number = now.get(Calendar.MONTH) + 1;
-																	if (number < 10) {
-																		month = "0" + number;
-																	}
-																	if (now.get(Calendar.MINUTE) < 10) {
-																		minute = "0" + now.get(Calendar.MINUTE);
-																	}
-																	String time = now.get(Calendar.YEAR) + "年" + month + "月"
-																			+ now.get(Calendar.DAY_OF_MONTH) + "日" + now.get(Calendar.HOUR_OF_DAY) + ":"
-																			+ minute;
-
-																	merchantinfo = merchantList.get(0);
-																	String phone = originalinfo.getV_phone();// 法人手机号
-
-																	// 查询余额
-																	smsBalanceRequest = new SmsBalanceRequest(ACCOUNT, PSWD);
-
-																	String balancerequestJson = JSON.toJSONString(smsBalanceRequest);
-
-																	logger.info("查询短信余额前上送的数据:" + balancerequestJson);
-
-																	String balanceresponse = ChuangLanSmsUtil.sendSmsByPost(smsBalanceRequestUrl,
-																			balancerequestJson);
-
-																	logger.info("查询短信余额响应信息 : " + balanceresponse);
-
-																	smsVarableResponse = JSON.parseObject(balanceresponse, SmsBalanceResponse.class);
-
-																	logger.info("查询余额实体信息 : " + smsVarableResponse);
-
-																	if ("0".equals(smsVarableResponse.getCode())) {
-																		logger.info("剩余可用余额条数:" + smsVarableResponse.getBalance());
-
-																		if (Integer.parseInt(smsVarableResponse.getBalance()) > 0) {
-
-																			Integer num1 = (int) ((Math.random() * 9 + 1) * 100000);
-
-																			logger.info("上送的验证码：" + num1);
-
-																			// 验证码实现
-
-																			String params = originalinfo.getV_phone() + "," + num1.toString() + "," + time;
-
-																			String massage = MSG + num1.toString();
-																			SmsVariableRequest smsVariableRequest = new SmsVariableRequest(ACCOUNT, PSWD,
-																					MSG, params, REPORT);
-																			SmsSendRequest smsSingleRequest = new SmsSendRequest(ACCOUNT, PSWD, massage,
-																					phone, REPORT);
-
-																			String varrequestJson = JSON.toJSONString(smsVariableRequest);
-
-																			logger.info("普通短信请求前数据:" + varrequestJson);
-																			String smsresponse = ChuangLanSmsUtil.sendSmsByPost(smsVariableRequestUrl,
-																					varrequestJson);
-
-																			logger.info("普通短信响应数据:" + smsresponse);
-																			SmsSendResponse smsSingleResponse = JSON.parseObject(smsresponse,
-																					SmsSendResponse.class);
-																			SmsVariableResponse smsVariableResponse = JSON.parseObject(smsresponse,
-																					SmsVariableResponse.class);
-																			if ("0".equals(smsVariableResponse.getCode())) {
-																				OriginalOrderInfo info = new OriginalOrderInfo();
-																				info.setOrderId(originalinfo.getV_oid());
-																				info.setSumCode(num1.toString());
-																				number = originalDao.update(info);
-																				if (number > 0) {
-																					retMap.put("v_mid", originalinfo.getV_mid());
-																					retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																					retMap.put("v_time", originalinfo.getV_time());
-																					retMap.put("v_code", "00");
-																					retMap.put("v_msg", "请求成功");
-																					retMap.put("v_oid", originalinfo.getV_oid());
-																				}
-																			}
-																		} else {
-
-																			logger.info("余额不足，请充值" + smsVarableResponse.getCode());
-																			// retMap.put("002", "余额不足,请充值");
-																		}
-
-																	} else {
-
-																		logger.info("信息有误，请充重新提交" + smsVarableResponse.getCode());
-																		return setResp("07", "系统异常，请重试或联系客服");
-																	}
-																}
-
-																break;
-															case "YBLS":// 易宝快捷
-																if ("1".equals(originalinfo.getV_type())) {
-																	now = Calendar.getInstance();
-																	number = now.get(Calendar.MONTH) + 1;
-																	minute = "";
-																	month = "";
-																	if (number < 10) {
-																		month = "0" + number;
-																	}
-																	if (now.get(Calendar.MINUTE) < 10) {
-																		minute = "0" + now.get(Calendar.MINUTE);
-																	}
-																	String time = now.get(Calendar.YEAR) + "年" + month + "月"
-																			+ now.get(Calendar.DAY_OF_MONTH) + "日" + now.get(Calendar.HOUR_OF_DAY) + ":"
-																			+ minute;
-
-																	merchantinfo = merchantList.get(0);
-																	String phone = originalinfo.getV_phone();// 法人手机号
-
-																	// 查询余额
-																	smsBalanceRequest = new SmsBalanceRequest(ACCOUNT, PSWD);
-
-																	String balancerequestJson = JSON.toJSONString(smsBalanceRequest);
-
-																	logger.info("查询短信余额前上送的数据:" + balancerequestJson);
-
-																	String balanceresponse = ChuangLanSmsUtil.sendSmsByPost(smsBalanceRequestUrl,
-																			balancerequestJson);
-
-																	logger.info("查询短信余额响应信息 : " + balanceresponse);
-
-																	smsVarableResponse = JSON.parseObject(balanceresponse, SmsBalanceResponse.class);
-
-																	logger.info("查询余额实体信息 : " + smsVarableResponse);
-
-																	if ("0".equals(smsVarableResponse.getCode())) {
-																		logger.info("剩余可用余额条数:" + smsVarableResponse.getBalance());
-
-																		if (Integer.parseInt(smsVarableResponse.getBalance()) > 0) {
-
-																			Integer num1 = (int) ((Math.random() * 9 + 1) * 100000);
-
-																			logger.info("上送的验证码：" + num1);
-
-																			// 验证码实现
-
-																			String params = originalinfo.getV_phone() + "," + num1.toString() + "," + time;
-
-																			String massage = MSG + num1.toString();
-																			SmsVariableRequest smsVariableRequest = new SmsVariableRequest(ACCOUNT, PSWD,
-																					MSG, params, REPORT);
-																			SmsSendRequest smsSingleRequest = new SmsSendRequest(ACCOUNT, PSWD, massage,
-																					phone, REPORT);
-
-																			String varrequestJson = JSON.toJSONString(smsVariableRequest);
-
-																			logger.info("普通短信请求前数据:" + varrequestJson);
-																			String smsresponse = ChuangLanSmsUtil.sendSmsByPost(smsVariableRequestUrl,
-																					varrequestJson);
-
-																			logger.info("普通短信响应数据:" + smsresponse);
-																			SmsSendResponse smsSingleResponse = JSON.parseObject(smsresponse,
-																					SmsSendResponse.class);
-																			SmsVariableResponse smsVariableResponse = JSON.parseObject(smsresponse,
-																					SmsVariableResponse.class);
-																			if ("0".equals(smsVariableResponse.getCode())) {
-																				OriginalOrderInfo info = new OriginalOrderInfo();
-																				info.setOrderId(originalinfo.getV_oid());
-																				info.setSumCode(num1.toString());
-																				number = originalDao.update(info);
-																				if (number > 0) {
-																					retMap.put("v_mid", originalinfo.getV_mid());
-																					retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																					retMap.put("v_time", originalinfo.getV_time());
-																					retMap.put("v_code", "00");
-																					retMap.put("v_msg", "请求成功");
-																					retMap.put("v_oid", originalinfo.getV_oid());
-																				}
-																			}
-																		} else {
-
-																			logger.info("余额不足，请充值" + smsVarableResponse.getCode());
-																			// retMap.put("002", "余额不足,请充值");
-																		}
-
-																	} else {
-
-																		logger.info("信息有误，请充重新提交" + smsVarableResponse.getCode());
-																		return setResp("07", "系统异常，请重试或联系客服");
-																	}
-																}
-																break;
-															case "MBYLM":// 摩宝快捷
-
-																Map<String, String> transmap = new LinkedHashMap<String, String>();
-																transmap.put("versionId", "001"); // 版本号 固定
-																transmap.put("businessType", "1401"); // 预交易 1401
-																transmap.put("merId", "936640995770000"); // 商户号
-																transmap.put("orderId", originalinfo.getV_oid()); // 订单号
-																transmap.put("transDate", originalinfo.getV_time()); // 时间 yymmddhhmmss
-																transmap.put("transAmount", originalinfo.getV_txnAmt()); // 金额
-																															// 单位元，对于正式商户最低支付金额为10元
-																transmap.put("cardByName", MD5Util.encode(originalinfo.getV_realName().getBytes("UTF-8"))); // 此处的MD5util为Base64加密
-																transmap.put("cardByNo", originalinfo.getV_cardNo()); // 卡号
-																if ("1".equals(originalinfo.getV_accountType())) {
-																	transmap.put("cardType", "01"); // 卡类型01借记卡
-
-																} else if ("2".equals(originalinfo.getV_accountType())) {
-
-																	transmap.put("cardType", "00"); // 卡类型00贷记卡
-																	transmap.put("expireDate", originalinfo.getV_expired()); // 有效期
-																	transmap.put("CVV", originalinfo.getV_cvn2()); // CVN
-																}
-																// transmap.put("bankCode",mbReqest.getBankCode()); //可为空 银行代码
-																// transmap.put("openBankName",mbReqest.getOpenBankName());//可为空 银行代码
-																transmap.put("cerType", "01"); // 证件类型 01 身份证
-																transmap.put("cerNumber", originalinfo.getV_cert_no());// 身份证
-																transmap.put("mobile", originalinfo.getV_phone()); // 手机号
-																transmap.put("isAcceptYzm", "00"); // 默认00
-																transmap.put("backNotifyUrl", MBUtil.notifyUrl);
-																transmap.put("instalTransFlag", "01"); // 分期标志
-																// 需要加密的字符串
-																String signstr = EncodeUtil.getUrlStr(transmap);
-																logger.info("需要签名的明文" + signstr);
-																String signtrue = MD5Util.MD5Encode(signstr + merKey);
-																transmap.put("signType", "MD5");
-																transmap.put("signData", signtrue);
-																// AES加密
-																String transUrlStr = EncodeUtil.getUrlStr(transmap);
-																//
-																String transData = AESUtil.encrypt(transUrlStr, merKey);
-																// 生产地址
-																String testUrl = MBUtil.quick;
-																String str = DemoBase.requestBody(merId, transData, testUrl);
-																// 获取交易返回结果
-																logger.info(str);
-																ObjectMapper om = new ObjectMapper();
-																Map<String, String> maps = new HashMap<>();
-																maps = om.readValue(str, Map.class);
-																retMap.put("v_mid", originalinfo.getV_mid());
-																retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																retMap.put("v_time", originalinfo.getV_time());
-																retMap.put("v_oid", originalinfo.getV_oid());
-																if ("00".equals(maps.get("status"))) {
-																	if ("01".equals(maps.get("refCode"))) {
-																		OriginalOrderInfo info = new OriginalOrderInfo();
-																		info.setMerchantOrderId(maps.get("ksPayOrderId"));
-																		info.setOrderId(originalinfo.getV_oid());
-																		number = originalDao.update(info);
-																		retMap.put("v_code", "00");
-																		retMap.put("v_msg", "请求成功");
-																	} else if ("02".equals(maps.get("refCode"))) {
-																		retMap.put("v_code", "15");
-																		retMap.put("v_msg", "请求失败");
-																	} else {
-																		retMap.put("v_code", "15");
-																		retMap.put("v_msg", "请求失败");
-																	}
-																} else if ("01".equals(maps.get("status"))) {
-																	retMap.put("v_code", "15");
-																	retMap.put("v_msg", "请求失败");
-																} else if ("02".equals(maps.get("status"))) {
-																	retMap.put("v_code", "15");
-																	retMap.put("v_msg", "请求失败");
-																}
-																break;
-															case "HLB":// 合利宝快捷
-																LinkedHashMap<String, String> map = new LinkedHashMap<>();
-																try {
-																	map.put("P1_bizType", "QuickPayBankCardPay");
-																	map.put("P2_customerNumber", "C" + pmsBusinessPos.getBusinessnum());
-																	map.put("P3_userId", originalinfo.getV_oid());// 170000000002
-																	map.put("P4_orderId", originalinfo.getV_oid());
-																	map.put("P5_timestamp", originalinfo.getV_time());
-																	map.put("P6_payerName", originalinfo.getV_realName());// URLEncoder.encode("安晓楠","UTF-8")
-																	map.put("P7_idCardType", "IDCARD");
-																	map.put("P8_idCardNo", originalinfo.getV_cert_no());// URLEncoder.encode("130722198710107446","UTF-8")
-																	map.put("P9_cardNo", originalinfo.getV_cardNo());// URLEncoder.encode("5268550479591851","UTF-8")
-																	// map.put("P10_year",
-																	// hlbRequest.getYear()==null?"":hlbRequest.getYear());//URLEncoder.encode("20","UTF-8")
-																	// map.put("P11_month",hlbRequest.getMonth()==null?"":hlbRequest.getMonth());//URLEncoder.encode("07","UTF-8");
-																	map.put("P12_cvv2", originalinfo.getV_cvn2() == null ? "" : originalinfo.getV_cvn2());// URLEncoder.encode("862","UTF-8")
-																	map.put("P13_phone", originalinfo.getV_phone());// URLEncoder.encode("15652000669","UTF-8")
-																	map.put("P14_currency", "CNY");
-																	map.put("P15_orderAmount", Double.parseDouble(originalinfo.getV_txnAmt()) + "");
-																	map.put("P16_goodsName", originalinfo.getV_productDesc());
-																	map.put("P17_goodsDesc", originalinfo.getV_productDesc());
-																	map.put("P18_terminalType", "IMEI");
-																	map.put("P19_terminalId", originalinfo.getV_oid());
-																	map.put("P20_orderIp", "127.0.0.1");
-																	// map.put("P21_period",
-																	// hlbRequest.getPeriod()==null?"1":hlbRequest.getPeriod());
-																	// map.put("P22_periodUnit",
-																	// hlbRequest.getPeriodUnit()==null?"Day":hlbRequest.getPeriodUnit());
-																	map.put("P23_serverCallbackUrl", HLBUtil.notifyUrl);
-																	logger.info("签名之前的数据:" + map);
-																	String key = pmsBusinessPos.getKek();
-																	String oriMessage = MyBeanUtils.getSigned(map, null, key);
-																	logger.info("签名原文串：" + oriMessage);
-																	sign = Disguiser.disguiseMD5(oriMessage, "UTF-8");
-																	map.put("sign", sign);
-																	Map<String, Object> resultMap1 = HttpClientService.getHttpResp(map, HLBUtil.url);
-																	String s = resultMap1.get("response").toString();
-																	System.out.println(s);
-																	json = JSONObject.parseObject(s);
-																	if ("0000".equals(json.getString("rt2_retCode"))) {
-																		map.put("P1_bizType", "QuickPaySendValidateCode");
-																		map.put("P2_customerNumber", "C" + pmsBusinessPos.getBusinessnum());
-																		map.put("P3_orderId", originalinfo.getV_oid());
-																		map.put("P4_timestamp", originalinfo.getV_time());
-																		map.put("P5_phone", originalinfo.getV_phone());
-																		logger.info("签名之前的数据:" + map);
-																		// String key=pmsBusinessPos.getKek();
-																		oriMessage = MyBeanUtils.getSigned(map, null, key);
-																		logger.info("签名原文串：" + oriMessage);
-																		sign = Disguiser.disguiseMD5(oriMessage, "UTF-8");
-																		map.put("sign", sign);
-																		Map<String, Object> resultMap2 = HttpClientService.getHttpResp(map, HLBUtil.url);
-																		logger.info("获取短信验证码返回参数:" + JSON.toJSONString(resultMap));
-																		s = resultMap2.get("response").toString();
-																		System.out.println(s);
-																		json = JSONObject.parseObject(s);
-																		if ("0000".equals(json.getString("rt2_retCode"))) {
-																			retMap.put("respCode", "00");
-																			retMap.put("type", originalinfo.getV_type());
-																			retMap.put("merNo", originalinfo.getV_mid());
-																			retMap.put("phone", json.getString("rt6_phone"));
-																			retMap.put("respMsg", json.getString("rt3_retMsg"));
-																			retMap.put("orderId", json.getString("rt5_orderId"));
-
-																		} else {
-																			retMap.put("respCode", "15");
-																			retMap.put("type", originalinfo.getV_type());
-																			retMap.put("merNo", originalinfo.getV_mid());
-																			retMap.put("phone", json.getString("rt6_phone"));
-																			retMap.put("respMsg", json.getString("rt3_retMsg"));
-																			retMap.put("orderId", json.getString("rt5_orderId"));
-																		}
-
-																	} else {
-																		retMap.put("respCode", "01");
-																		retMap.put("type", originalinfo.getV_type());
-																		retMap.put("merNo", originalinfo.getV_mid());
-																		retMap.put("userId", originalinfo.getV_oid());
-																		retMap.put("respMsg", json.getString("rt3_retMsg"));
-																		retMap.put("orderId", json.getString("rt5_orderId"));
-																	}
-																	logger.info("下单返回参数:" + JSON.toJSONString(resultMap));
-
-																} catch (Exception e) {
-																	logger.info("下单" + e);
-																}
-																break;
-															case "GZHM":// 广州恒明有积分快捷
-																JSONObject requestObj = new JSONObject();
-																requestObj.put("ordernumber", originalinfo.getV_oid());
-																requestObj.put("merchantid", "M" + pmsBusinessPos.getBusinessnum());
-																requestObj.put("username", originalinfo.getV_realName());
-																requestObj.put("userpid", originalinfo.getV_pmsBankNo());
-																requestObj.put("usercardno", originalinfo.getV_cardNo());
-																requestObj.put("usertel", originalinfo.getV_phone());
-																requestObj.put("amount", originalinfo.getV_txnAmt());// 单位分 100=1元
-																if ("0".equals(originalinfo.getV_type())) {
-																	requestObj.put("ordertype", "10");// 10:D0,11:T1
-
-																} else if ("1".equals(originalinfo.getV_type())) {
-																	requestObj.put("ordertype", "11");// 10:D0,11:T1
-																}
-																requestObj.put("cvn2", originalinfo.getV_cvn2() == null ? "" : originalinfo.getV_cvn2());
-																requestObj.put("expdate",
-																		originalinfo.getV_expired() == null ? "" : originalinfo.getV_expired());
-																requestObj.put("usertel", originalinfo.getV_phone());
-																requestObj.put("backurl", HMUtil.quickUrl);
-																requestObj.put("returnurl", "");
-																String encryptdata = AesEncryption.Encrypt(requestObj.toJSONString(), HMUtil.aeskey,
-																		HMUtil.aeskey);
-
-																String timestamp = TimeUtil.getTime();
-																signstr = SHA256Util.sha256(pmsBusinessPos.getKek() + "M" + pmsBusinessPos.getBusinessnum()
-																		+ encryptdata + timestamp + pmsBusinessPos.getKek());
-																System.out.println(signstr);
-																JSONObject jsonObject = new JSONObject();
-																jsonObject.put("merchantid", "M" + pmsBusinessPos.getBusinessnum());
-																jsonObject.put("data", encryptdata);
-																jsonObject.put("timestamp", timestamp);
-																jsonObject.put("sign", signstr);
-																String postdata = "merchantid=" + "M" + pmsBusinessPos.getBusinessnum() + "&data="
-																		+ encryptdata + "&timestamp=" + timestamp + "&sign=" + signstr;
-																String openApiUrl = "";
-																if (!"".equals(originalinfo.getV_cvn2())) {
-																	openApiUrl = HMUtil.quickPayXinUrl;
-																} else {
-																	openApiUrl = HMUtil.quickPayJieUrl;
-																}
-																String results = HttpsUtil.doSslPost(openApiUrl, postdata, "utf-8");
-																logger.info("恒明返回参数：" + results);
-
-																JSONObject responseObj = JSONObject.parseObject(results);
-																logger.info("message:" + responseObj.get("message"));
-																retMap.put("v_mid", originalinfo.getV_mid());
-																retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																retMap.put("v_time", originalinfo.getV_time());
-																retMap.put("v_oid", originalinfo.getV_oid());
-																if ("0".equals(responseObj.get("ret").toString())) {
-																	String dedata = AesEncryption.Desencrypt(responseObj.get("data").toString(),
-																			HMUtil.aeskey, HMUtil.aeskey);
-																	logger.info("恒明解析参数：" + dedata);
-																	JSONObject jsonObject2 = JSONObject.parseObject(dedata);
-																	// PmsAppTransInfo pmsAppTransInfo =
-																	// pmsAppTransInfoDao.searchOrderInfo(pospTransInfo.getOrderId());
-																	if ("0".equals(jsonObject2.get("orderstate"))) {
-																		OriginalOrderInfo info = new OriginalOrderInfo();
-																		info.setMerchantOrderId(jsonObject2.getString("payorderno"));
-																		info.setOrderId(originalinfo.getV_oid());
-																		number = originalDao.update(info);
-																		retMap.put("v_code", "00");
-																		retMap.put("v_msg", "请求成功");
-
-																	} else {
-																		retMap.put("v_code", "15");
-																		retMap.put("v_msg", "请求失败");
-																		return retMap;
-
 																	}
 																} else {
 																	retMap.put("v_code", "15");
 																	retMap.put("v_msg", "请求失败");
 																	return retMap;
 																}
-																break;
 
-															case "SYYS":// 沈阳银盛
-																PmsWeixinMerchartInfo weixin = new PmsWeixinMerchartInfo();
+															}
+														} else {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+															return retMap;
+														}
+													} else {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+														return retMap;
+													}
+												} else {
+													number = now.get(Calendar.MONTH) + 1;
+													if (number < 10) {
+														month = "0" + number;
+													}
+													if (now.get(Calendar.MINUTE) < 10) {
+														minute = "0" + now.get(Calendar.MINUTE);
+													}
+													String time = now.get(Calendar.YEAR) + "年" + month + "月"
+															+ now.get(Calendar.DAY_OF_MONTH) + "日"
+															+ now.get(Calendar.HOUR_OF_DAY) + ":" + minute;
 
-																weixin.setCardNo(originalinfo.getV_settleCardNo());
-																weixin.setRealName(originalinfo.getV_settleName());
-																weixin.setCertNo(originalinfo.getV_cert_no());
-																weixin.setMobile(originalinfo.getV_phone());
+													merchantinfo = merchantList.get(0);
+													String phone = originalinfo.getV_phone();// 法人手机号
 
-																PmsWeixinMerchartInfo model = weixinService.selectByCardEntity(weixin);
+													// 查询余额
+													smsBalanceRequest = new SmsBalanceRequest(ACCOUNT, PSWD);
 
-																logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(model));
+													String balancerequestJson = JSON.toJSONString(smsBalanceRequest);
 
-																if (model == null) {
-																	Map<String, String> requestMap = new HashMap<String, String>();
-																	requestMap.put("merchId", "m1803070001"); // 商户全称，企业商户填写营业执照名称
-																	requestMap.put("merchantName", originalinfo.getV_productDesc()); // 商户全称，企业商户填写营业执照名称
-																	requestMap.put("channel", "WLB");
-																	requestMap.put("installProvince", bank.getBank_province());
-																	requestMap.put("installCity", bank.getBank_city());
-																	requestMap.put("installCounty", bank.getBank_city());
-																	requestMap.put("operateAddress", bank.getBank_city());
-																	requestMap.put("legalPersonName", originalinfo.getV_settleName()); // 法人姓名，如果bankType为TOPRIVATE，则结算账户与法人必须一致,
-																	// 如果bankType为TOPUBLIC，结算账户名和商户名称是一致的
-																	requestMap.put("legalPersonID", originalinfo.getV_cert_no()); // 法人身份证
-																	requestMap.put("merchantPersonPhone", originalinfo.getV_phone());// 商户联系人电话
-																	// 如果bankType为TOPRIVATE，则legalPersonName与accountName必须一致
-																	requestMap.put("accountNo", originalinfo.getV_settleCardNo());
-																	requestMap.put("bankBranch", bank.getBank_name());
-																	requestMap.put("bankProv", bank.getBank_province());
-																	requestMap.put("bankCity", bank.getBank_city());
-																	requestMap.put("bankCode", originalinfo.getV_settlePmsBankNo());
-																	requestMap.put("bankName", bank.getBank_short_title());
-																	requestMap.put("fastRate", originalinfo.getV_userFee());
-																	String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+													logger.info("查询短信余额前上送的数据:" + balancerequestJson);
+
+													String balanceresponse = ChuangLanSmsUtil
+															.sendSmsByPost(smsBalanceRequestUrl, balancerequestJson);
+
+													logger.info("查询短信余额响应信息 : " + balanceresponse);
+
+													smsVarableResponse = JSON.parseObject(balanceresponse,
+															SmsBalanceResponse.class);
+
+													logger.info("查询余额实体信息 : " + smsVarableResponse);
+
+													if ("0".equals(smsVarableResponse.getCode())) {
+														logger.info("剩余可用余额条数:" + smsVarableResponse.getBalance());
+
+														if (Integer.parseInt(smsVarableResponse.getBalance()) > 0) {
+
+															Integer num1 = (int) ((Math.random() * 9 + 1) * 100000);
+
+															logger.info("上送的验证码：" + num1);
+
+															// 验证码实现
+
+															String params = originalinfo.getV_phone() + ","
+																	+ num1.toString() + "," + time;
+
+															String massage = MSG + num1.toString();
+															SmsVariableRequest smsVariableRequest = new SmsVariableRequest(
+																	ACCOUNT, PSWD, MSG, params, REPORT);
+															SmsSendRequest smsSingleRequest = new SmsSendRequest(
+																	ACCOUNT, PSWD, massage, phone, REPORT);
+
+															String varrequestJson = JSON
+																	.toJSONString(smsVariableRequest);
+
+															logger.info("普通短信请求前数据:" + varrequestJson);
+															String smsresponse = ChuangLanSmsUtil.sendSmsByPost(
+																	smsVariableRequestUrl, varrequestJson);
+
+															logger.info("普通短信响应数据:" + smsresponse);
+															SmsSendResponse smsSingleResponse = JSON
+																	.parseObject(smsresponse, SmsSendResponse.class);
+															SmsVariableResponse smsVariableResponse = JSON.parseObject(
+																	smsresponse, SmsVariableResponse.class);
+															if ("0".equals(smsVariableResponse.getCode())) {
+																OriginalOrderInfo info = new OriginalOrderInfo();
+																info.setOrderId(originalinfo.getV_oid());
+																info.setSumCode(num1.toString());
+																number = originalDao.update(info);
+																if (number > 0) {
+																	retMap.put("v_mid", originalinfo.getV_mid());
+																	retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																	retMap.put("v_time", originalinfo.getV_time());
+																	retMap.put("v_code", "00");
+																	retMap.put("v_msg", "请求成功");
+																	retMap.put("v_oid", originalinfo.getV_oid());
+																}
+															}
+														} else {
+
+															logger.info("余额不足，请充值" + smsVarableResponse.getCode());
+															// retMap.put("002", "余额不足,请充值");
+														}
+
+													} else {
+
+														logger.info("信息有误，请充重新提交" + smsVarableResponse.getCode());
+														return setResp("07", "系统异常，请重试或联系客服");
+													}
+												}
+
+												break;
+											case "YBLS":// 易宝快捷
+												if ("1".equals(originalinfo.getV_type())) {
+													now = Calendar.getInstance();
+													number = now.get(Calendar.MONTH) + 1;
+													minute = "";
+													month = "";
+													if (number < 10) {
+														month = "0" + number;
+													}
+													if (now.get(Calendar.MINUTE) < 10) {
+														minute = "0" + now.get(Calendar.MINUTE);
+													}
+													String time = now.get(Calendar.YEAR) + "年" + month + "月"
+															+ now.get(Calendar.DAY_OF_MONTH) + "日"
+															+ now.get(Calendar.HOUR_OF_DAY) + ":" + minute;
+
+													merchantinfo = merchantList.get(0);
+													String phone = originalinfo.getV_phone();// 法人手机号
+
+													// 查询余额
+													smsBalanceRequest = new SmsBalanceRequest(ACCOUNT, PSWD);
+
+													String balancerequestJson = JSON.toJSONString(smsBalanceRequest);
+
+													logger.info("查询短信余额前上送的数据:" + balancerequestJson);
+
+													String balanceresponse = ChuangLanSmsUtil
+															.sendSmsByPost(smsBalanceRequestUrl, balancerequestJson);
+
+													logger.info("查询短信余额响应信息 : " + balanceresponse);
+
+													smsVarableResponse = JSON.parseObject(balanceresponse,
+															SmsBalanceResponse.class);
+
+													logger.info("查询余额实体信息 : " + smsVarableResponse);
+
+													if ("0".equals(smsVarableResponse.getCode())) {
+														logger.info("剩余可用余额条数:" + smsVarableResponse.getBalance());
+
+														if (Integer.parseInt(smsVarableResponse.getBalance()) > 0) {
+
+															Integer num1 = (int) ((Math.random() * 9 + 1) * 100000);
+
+															logger.info("上送的验证码：" + num1);
+
+															// 验证码实现
+
+															String params = originalinfo.getV_phone() + ","
+																	+ num1.toString() + "," + time;
+
+															String massage = MSG + num1.toString();
+															SmsVariableRequest smsVariableRequest = new SmsVariableRequest(
+																	ACCOUNT, PSWD, MSG, params, REPORT);
+															SmsSendRequest smsSingleRequest = new SmsSendRequest(
+																	ACCOUNT, PSWD, massage, phone, REPORT);
+
+															String varrequestJson = JSON
+																	.toJSONString(smsVariableRequest);
+
+															logger.info("普通短信请求前数据:" + varrequestJson);
+															String smsresponse = ChuangLanSmsUtil.sendSmsByPost(
+																	smsVariableRequestUrl, varrequestJson);
+
+															logger.info("普通短信响应数据:" + smsresponse);
+															SmsSendResponse smsSingleResponse = JSON
+																	.parseObject(smsresponse, SmsSendResponse.class);
+															SmsVariableResponse smsVariableResponse = JSON.parseObject(
+																	smsresponse, SmsVariableResponse.class);
+															if ("0".equals(smsVariableResponse.getCode())) {
+																OriginalOrderInfo info = new OriginalOrderInfo();
+																info.setOrderId(originalinfo.getV_oid());
+																info.setSumCode(num1.toString());
+																number = originalDao.update(info);
+																if (number > 0) {
+																	retMap.put("v_mid", originalinfo.getV_mid());
+																	retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																	retMap.put("v_time", originalinfo.getV_time());
+																	retMap.put("v_code", "00");
+																	retMap.put("v_msg", "请求成功");
+																	retMap.put("v_oid", originalinfo.getV_oid());
+																}
+															}
+														} else {
+
+															logger.info("余额不足，请充值" + smsVarableResponse.getCode());
+															// retMap.put("002", "余额不足,请充值");
+														}
+
+													} else {
+
+														logger.info("信息有误，请充重新提交" + smsVarableResponse.getCode());
+														return setResp("07", "系统异常，请重试或联系客服");
+													}
+												}
+												break;
+											case "MBYLM":// 摩宝快捷
+
+												Map<String, String> transmap = new LinkedHashMap<String, String>();
+												transmap.put("versionId", "001"); // 版本号 固定
+												transmap.put("businessType", "1401"); // 预交易 1401
+												transmap.put("merId", "936640995770000"); // 商户号
+												transmap.put("orderId", originalinfo.getV_oid()); // 订单号
+												transmap.put("transDate", originalinfo.getV_time()); // 时间 yymmddhhmmss
+												transmap.put("transAmount", originalinfo.getV_txnAmt()); // 金额
+																											// 单位元，对于正式商户最低支付金额为10元
+												transmap.put("cardByName",
+														MD5Util.encode(originalinfo.getV_realName().getBytes("UTF-8"))); // 此处的MD5util为Base64加密
+												transmap.put("cardByNo", originalinfo.getV_cardNo()); // 卡号
+												if ("1".equals(originalinfo.getV_accountType())) {
+													transmap.put("cardType", "01"); // 卡类型01借记卡
+
+												} else if ("2".equals(originalinfo.getV_accountType())) {
+
+													transmap.put("cardType", "00"); // 卡类型00贷记卡
+													transmap.put("expireDate", originalinfo.getV_expired()); // 有效期
+													transmap.put("CVV", originalinfo.getV_cvn2()); // CVN
+												}
+												// transmap.put("bankCode",mbReqest.getBankCode()); //可为空 银行代码
+												// transmap.put("openBankName",mbReqest.getOpenBankName());//可为空 银行代码
+												transmap.put("cerType", "01"); // 证件类型 01 身份证
+												transmap.put("cerNumber", originalinfo.getV_cert_no());// 身份证
+												transmap.put("mobile", originalinfo.getV_phone()); // 手机号
+												transmap.put("isAcceptYzm", "00"); // 默认00
+												transmap.put("backNotifyUrl", MBUtil.notifyUrl);
+												transmap.put("instalTransFlag", "01"); // 分期标志
+												// 需要加密的字符串
+												String signstr = EncodeUtil.getUrlStr(transmap);
+												logger.info("需要签名的明文" + signstr);
+												String signtrue = MD5Util.MD5Encode(signstr + merKey);
+												transmap.put("signType", "MD5");
+												transmap.put("signData", signtrue);
+												// AES加密
+												String transUrlStr = EncodeUtil.getUrlStr(transmap);
+												//
+												String transData = AESUtil.encrypt(transUrlStr, merKey);
+												// 生产地址
+												String testUrl = MBUtil.quick;
+												String str = DemoBase.requestBody(merId, transData, testUrl);
+												// 获取交易返回结果
+												logger.info(str);
+												ObjectMapper om = new ObjectMapper();
+												Map<String, String> maps = new HashMap<>();
+												maps = om.readValue(str, Map.class);
+												retMap.put("v_mid", originalinfo.getV_mid());
+												retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+												retMap.put("v_time", originalinfo.getV_time());
+												retMap.put("v_oid", originalinfo.getV_oid());
+												if ("00".equals(maps.get("status"))) {
+													if ("01".equals(maps.get("refCode"))) {
+														OriginalOrderInfo info = new OriginalOrderInfo();
+														info.setMerchantOrderId(maps.get("ksPayOrderId"));
+														info.setOrderId(originalinfo.getV_oid());
+														number = originalDao.update(info);
+														retMap.put("v_code", "00");
+														retMap.put("v_msg", "请求成功");
+													} else if ("02".equals(maps.get("refCode"))) {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													} else {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													}
+												} else if ("01".equals(maps.get("status"))) {
+													retMap.put("v_code", "15");
+													retMap.put("v_msg", "请求失败");
+												} else if ("02".equals(maps.get("status"))) {
+													retMap.put("v_code", "15");
+													retMap.put("v_msg", "请求失败");
+												}
+												break;
+											case "HLB":// 合利宝快捷
+												LinkedHashMap<String, String> map = new LinkedHashMap<>();
+												try {
+													map.put("P1_bizType", "QuickPayBankCardPay");
+													map.put("P2_customerNumber", "C" + pmsBusinessPos.getBusinessnum());
+													map.put("P3_userId", originalinfo.getV_oid());// 170000000002
+													map.put("P4_orderId", originalinfo.getV_oid());
+													map.put("P5_timestamp", originalinfo.getV_time());
+													map.put("P6_payerName", originalinfo.getV_realName());// URLEncoder.encode("安晓楠","UTF-8")
+													map.put("P7_idCardType", "IDCARD");
+													map.put("P8_idCardNo", originalinfo.getV_cert_no());// URLEncoder.encode("130722198710107446","UTF-8")
+													map.put("P9_cardNo", originalinfo.getV_cardNo());// URLEncoder.encode("5268550479591851","UTF-8")
+													// map.put("P10_year",
+													// hlbRequest.getYear()==null?"":hlbRequest.getYear());//URLEncoder.encode("20","UTF-8")
+													// map.put("P11_month",hlbRequest.getMonth()==null?"":hlbRequest.getMonth());//URLEncoder.encode("07","UTF-8");
+													map.put("P12_cvv2", originalinfo.getV_cvn2() == null ? ""
+															: originalinfo.getV_cvn2());// URLEncoder.encode("862","UTF-8")
+													map.put("P13_phone", originalinfo.getV_phone());// URLEncoder.encode("15652000669","UTF-8")
+													map.put("P14_currency", "CNY");
+													map.put("P15_orderAmount",
+															Double.parseDouble(originalinfo.getV_txnAmt()) + "");
+													map.put("P16_goodsName", originalinfo.getV_productDesc());
+													map.put("P17_goodsDesc", originalinfo.getV_productDesc());
+													map.put("P18_terminalType", "IMEI");
+													map.put("P19_terminalId", originalinfo.getV_oid());
+													map.put("P20_orderIp", "127.0.0.1");
+													// map.put("P21_period",
+													// hlbRequest.getPeriod()==null?"1":hlbRequest.getPeriod());
+													// map.put("P22_periodUnit",
+													// hlbRequest.getPeriodUnit()==null?"Day":hlbRequest.getPeriodUnit());
+													map.put("P23_serverCallbackUrl", HLBUtil.notifyUrl);
+													logger.info("签名之前的数据:" + map);
+													String key = pmsBusinessPos.getKek();
+													String oriMessage = MyBeanUtils.getSigned(map, null, key);
+													logger.info("签名原文串：" + oriMessage);
+													sign = Disguiser.disguiseMD5(oriMessage, "UTF-8");
+													map.put("sign", sign);
+													Map<String, Object> resultMap1 = HttpClientService.getHttpResp(map,
+															HLBUtil.url);
+													String s = resultMap1.get("response").toString();
+													System.out.println(s);
+													json = JSONObject.parseObject(s);
+													if ("0000".equals(json.getString("rt2_retCode"))) {
+														map.put("P1_bizType", "QuickPaySendValidateCode");
+														map.put("P2_customerNumber",
+																"C" + pmsBusinessPos.getBusinessnum());
+														map.put("P3_orderId", originalinfo.getV_oid());
+														map.put("P4_timestamp", originalinfo.getV_time());
+														map.put("P5_phone", originalinfo.getV_phone());
+														logger.info("签名之前的数据:" + map);
+														// String key=pmsBusinessPos.getKek();
+														oriMessage = MyBeanUtils.getSigned(map, null, key);
+														logger.info("签名原文串：" + oriMessage);
+														sign = Disguiser.disguiseMD5(oriMessage, "UTF-8");
+														map.put("sign", sign);
+														Map<String, Object> resultMap2 = HttpClientService
+																.getHttpResp(map, HLBUtil.url);
+														logger.info("获取短信验证码返回参数:" + JSON.toJSONString(resultMap));
+														s = resultMap2.get("response").toString();
+														System.out.println(s);
+														json = JSONObject.parseObject(s);
+														if ("0000".equals(json.getString("rt2_retCode"))) {
+															retMap.put("respCode", "00");
+															retMap.put("type", originalinfo.getV_type());
+															retMap.put("merNo", originalinfo.getV_mid());
+															retMap.put("phone", json.getString("rt6_phone"));
+															retMap.put("respMsg", json.getString("rt3_retMsg"));
+															retMap.put("orderId", json.getString("rt5_orderId"));
+
+														} else {
+															retMap.put("respCode", "15");
+															retMap.put("type", originalinfo.getV_type());
+															retMap.put("merNo", originalinfo.getV_mid());
+															retMap.put("phone", json.getString("rt6_phone"));
+															retMap.put("respMsg", json.getString("rt3_retMsg"));
+															retMap.put("orderId", json.getString("rt5_orderId"));
+														}
+
+													} else {
+														retMap.put("respCode", "01");
+														retMap.put("type", originalinfo.getV_type());
+														retMap.put("merNo", originalinfo.getV_mid());
+														retMap.put("userId", originalinfo.getV_oid());
+														retMap.put("respMsg", json.getString("rt3_retMsg"));
+														retMap.put("orderId", json.getString("rt5_orderId"));
+													}
+													logger.info("下单返回参数:" + JSON.toJSONString(resultMap));
+
+												} catch (Exception e) {
+													logger.info("下单" + e);
+												}
+												break;
+											case "GZHM":// 广州恒明有积分快捷
+												JSONObject requestObj = new JSONObject();
+												requestObj.put("ordernumber", originalinfo.getV_oid());
+												requestObj.put("merchantid", "M" + pmsBusinessPos.getBusinessnum());
+												requestObj.put("username", originalinfo.getV_realName());
+												requestObj.put("userpid", originalinfo.getV_pmsBankNo());
+												requestObj.put("usercardno", originalinfo.getV_cardNo());
+												requestObj.put("usertel", originalinfo.getV_phone());
+												requestObj.put("amount", originalinfo.getV_txnAmt());// 单位分 100=1元
+												if ("0".equals(originalinfo.getV_type())) {
+													requestObj.put("ordertype", "10");// 10:D0,11:T1
+
+												} else if ("1".equals(originalinfo.getV_type())) {
+													requestObj.put("ordertype", "11");// 10:D0,11:T1
+												}
+												requestObj.put("cvn2", originalinfo.getV_cvn2() == null ? ""
+														: originalinfo.getV_cvn2());
+												requestObj.put("expdate", originalinfo.getV_expired() == null ? ""
+														: originalinfo.getV_expired());
+												requestObj.put("usertel", originalinfo.getV_phone());
+												requestObj.put("backurl", HMUtil.quickUrl);
+												requestObj.put("returnurl", "");
+												String encryptdata = AesEncryption.Encrypt(requestObj.toJSONString(),
+														HMUtil.aeskey, HMUtil.aeskey);
+
+												String timestamp = TimeUtil.getTime();
+												signstr = SHA256Util.sha256(
+														pmsBusinessPos.getKek() + "M" + pmsBusinessPos.getBusinessnum()
+																+ encryptdata + timestamp + pmsBusinessPos.getKek());
+												System.out.println(signstr);
+												JSONObject jsonObject = new JSONObject();
+												jsonObject.put("merchantid", "M" + pmsBusinessPos.getBusinessnum());
+												jsonObject.put("data", encryptdata);
+												jsonObject.put("timestamp", timestamp);
+												jsonObject.put("sign", signstr);
+												String postdata = "merchantid=" + "M" + pmsBusinessPos.getBusinessnum()
+														+ "&data=" + encryptdata + "&timestamp=" + timestamp + "&sign="
+														+ signstr;
+												String openApiUrl = "";
+												if (!"".equals(originalinfo.getV_cvn2())) {
+													openApiUrl = HMUtil.quickPayXinUrl;
+												} else {
+													openApiUrl = HMUtil.quickPayJieUrl;
+												}
+												String results = HttpsUtil.doSslPost(openApiUrl, postdata, "utf-8");
+												logger.info("恒明返回参数：" + results);
+
+												JSONObject responseObj = JSONObject.parseObject(results);
+												logger.info("message:" + responseObj.get("message"));
+												retMap.put("v_mid", originalinfo.getV_mid());
+												retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+												retMap.put("v_time", originalinfo.getV_time());
+												retMap.put("v_oid", originalinfo.getV_oid());
+												if ("0".equals(responseObj.get("ret").toString())) {
+													String dedata = AesEncryption.Desencrypt(
+															responseObj.get("data").toString(), HMUtil.aeskey,
+															HMUtil.aeskey);
+													logger.info("恒明解析参数：" + dedata);
+													JSONObject jsonObject2 = JSONObject.parseObject(dedata);
+													// PmsAppTransInfo pmsAppTransInfo =
+													// pmsAppTransInfoDao.searchOrderInfo(pospTransInfo.getOrderId());
+													if ("0".equals(jsonObject2.get("orderstate"))) {
+														OriginalOrderInfo info = new OriginalOrderInfo();
+														info.setMerchantOrderId(jsonObject2.getString("payorderno"));
+														info.setOrderId(originalinfo.getV_oid());
+														number = originalDao.update(info);
+														retMap.put("v_code", "00");
+														retMap.put("v_msg", "请求成功");
+
+													} else {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+														return retMap;
+
+													}
+												} else {
+													retMap.put("v_code", "15");
+													retMap.put("v_msg", "请求失败");
+													return retMap;
+												}
+												break;
+
+											case "SYYS":// 沈阳银盛
+												PmsWeixinMerchartInfo weixin = new PmsWeixinMerchartInfo();
+
+												weixin.setCardNo(originalinfo.getV_settleCardNo());
+												weixin.setRealName(originalinfo.getV_settleName());
+												weixin.setCertNo(originalinfo.getV_cert_no());
+												weixin.setMobile(originalinfo.getV_phone());
+
+												PmsWeixinMerchartInfo model = weixinService.selectByCardEntity(weixin);
+
+												logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(model));
+
+												if (model == null) {
+													Map<String, String> requestMap = new HashMap<String, String>();
+													requestMap.put("merchId", "m1803070001"); // 商户全称，企业商户填写营业执照名称
+													requestMap.put("merchantName", originalinfo.getV_productDesc()); // 商户全称，企业商户填写营业执照名称
+													requestMap.put("channel", "WLB");
+													requestMap.put("installProvince", bank.getBank_province());
+													requestMap.put("installCity", bank.getBank_city());
+													requestMap.put("installCounty", bank.getBank_city());
+													requestMap.put("operateAddress", bank.getBank_city());
+													requestMap.put("legalPersonName", originalinfo.getV_settleName()); // 法人姓名，如果bankType为TOPRIVATE，则结算账户与法人必须一致,
+													// 如果bankType为TOPUBLIC，结算账户名和商户名称是一致的
+													requestMap.put("legalPersonID", originalinfo.getV_cert_no()); // 法人身份证
+													requestMap.put("merchantPersonPhone", originalinfo.getV_phone());// 商户联系人电话
+													// 如果bankType为TOPRIVATE，则legalPersonName与accountName必须一致
+													requestMap.put("accountNo", originalinfo.getV_settleCardNo());
+													requestMap.put("bankBranch", bank.getBank_name());
+													requestMap.put("bankProv", bank.getBank_province());
+													requestMap.put("bankCity", bank.getBank_city());
+													requestMap.put("bankCode", originalinfo.getV_settlePmsBankNo());
+													requestMap.put("bankName", bank.getBank_short_title());
+													requestMap.put("fastRate", originalinfo.getV_userFee());
+													String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+													// 得到带签名数据
+													Map<String, ?> filterMap = PayCore.paraFilter(requestMap);
+
+													String linkStr = PayCore.createLinkString(filterMap);
+													logger.info("签名公钥" + key);
+													logger.info("待签数据" + linkStr);
+													String hexSign = "";
+													try {
+														hexSign = PayCore.md5Sign(linkStr, key);
+													} catch (Exception e) {
+														e.printStackTrace();
+													}
+													logger.info("签名数据:" + hexSign);
+													requestMap.put("sign_info", hexSign);
+													String requestStr = JSON.toJSONString(requestMap);
+													url = "http://pay.unvpay.com/services/ysFast/addInfo";
+													String respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
+													logger.info("返回值：" + respStr);
+													json = JSONObject.parseObject(respStr);
+													if ("0000".equals(json.getString("ret_code"))) {
+														String app_id = json.getString("app_id");
+														logger.info("上游返回的app_id：" + app_id);
+														Map<String, String> requestMap1 = new HashMap<String, String>();
+
+														requestMap1.put("merchId", "m1803070001"); // 支付系统分配给商户的机构号
+														requestMap1.put("appId", app_id); // 商户号
+														requestMap1.put("fastRate", originalinfo.getV_userFee());
+														requestMap1.put("channel", "WLB");
+														// 加密签名
+														Map<String, ?> filterMap1 = null;
+														try {
+															filterMap1 = PayCore.paraFilter(requestMap1);
+														} catch (Exception e1) {
+															// TODO Auto-generated catch block
+															e1.printStackTrace();
+														}
+														String linkStr1 = PayCore.createLinkString(filterMap1);
+														logger.info("签名公钥" + key);
+														logger.info("待签数据" + linkStr1);
+														String hexSign1 = "";
+														try {
+															hexSign1 = PayCore.md5Sign(linkStr1, key);
+														} catch (Exception e) {
+															e.printStackTrace();
+														}
+														logger.info("签名数据:" + hexSign1);
+														requestMap1.put("sign_info", hexSign1);
+														String requestStr1 = JSON.toJSONString(requestMap1);
+
+														url = "http://pay.unvpay.com/services/ysFast/addRate";
+														String respStr1 = HttpClientUtil.post(url, "UTF-8",
+																requestStr1);
+														logger.info("返回值：" + respStr1);
+														json = JSONObject.parseObject(respStr1);
+														if ("0000".equals(json.getString("ret_code"))) {
+															app_id = json.getString("app_id");
+															logger.info("上游返回的app_id：" + app_id);
+															PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
+															merchartInfo.setAccount(app_id);// 账号
+															merchartInfo.setMerchartId(originalinfo.getV_mid());
+															merchartInfo
+																	.setMerchartName(merchantList.get(0).getMercName());
+															merchartInfo.setMerchartNameSort(
+																	merchantList.get(0).getShortname());
+															merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
+															merchartInfo.setCardNo(originalinfo.getV_settleCardNo());// 卡号
+															merchartInfo.setRealName(originalinfo.getV_settleName());// 姓名
+															merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
+															// merchartInfo.setAccountType(payRequest.getBusinessType());//账户类型
+															merchartInfo.setBankName(bank.getBank_name());// 开户行
+															merchartInfo
+																	.setPmsBankNo(originalinfo.getV_settlePmsBankNo());// 联行号
+															merchartInfo.setProvince(bank.getBank_province());// 省份
+															merchartInfo.setCity(bank.getBank_city());// 城市
+															merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
+															// merchartInfo.setWithdrawDepositSingleFee(payRequest.getWithdrawDepositSingleFee());//提现单笔手续费
+															merchartInfo.setoAgentNo("100333");
+															merchartInfo.setRateCode(originalinfo.getV_mid());
+															int i = weixinService.updateRegister(merchartInfo);
+															if (i > 0) {
+																PmsWeixinMerchartInfo pm = new PmsWeixinMerchartInfo();
+
+																pm.setCardNo(originalinfo.getV_cardNo());
+																pm.setRealName(originalinfo.getV_realName());
+																pm.setCertNo(originalinfo.getV_cert_no());
+																pm.setMobile(originalinfo.getV_phone());
+
+																PmsWeixinMerchartInfo pwm = weixinService
+																		.selectByCardEntity(pm);
+
+																logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(pwm));
+																if (pwm == null) {
+																	Map<String, String> requestMap2 = new HashMap<String, String>();
+																	requestMap2.put("order_num",
+																			originalinfo.getV_oid()); // 流水号
+																	requestMap2.put("app_id", app_id); // appId
+																	requestMap2.put("account_no",
+																			originalinfo.getV_cardNo()); // 银行账号
+																	requestMap2.put("mobile",
+																			originalinfo.getV_phone()); // 银行预留电话，不填则使用进件电话
+																	if ("1".equals(originalinfo.getV_accountType())) {
+																		requestMap2.put("card_type", "01"); // 卡类型
+																	} else if ("2"
+																			.equals(originalinfo.getV_accountType())) {
+																		requestMap2.put("card_type", "02"); // 卡类型
+																	}
+
+																	String call_back_url = BaseUtil.url
+																			+ "/quickPayAction/syysReturnUrl.action?order_num="
+																			+ originalinfo.getV_oid();
+
+																	requestMap2.put("call_back_url", call_back_url); // 跳转页面地址
+																	requestMap2.put("notify_url", BaseUtil.url
+																			+ "/quickPayAction/syysNotifyUrl.action"); // 接收异步通知地址
+																	requestMap2.put("open_type", "JF_OPEN"); // 开卡类型，为空，默认为UNION_PAY_OPEN
+																	requestMap2.put("channel", "WLB"); // 渠道
+																	requestMap2.put("version", "V2.1.1"); // 版本编号
+																	requestMap2.put("charset", "UTF-8"); // 字符编码
+
 																	// 得到带签名数据
-																	Map<String, ?> filterMap = PayCore.paraFilter(requestMap);
+																	filterMap = PayCore.paraFilter(requestMap2);
 
-																	String linkStr = PayCore.createLinkString(filterMap);
+																	linkStr = PayCore.createLinkString(filterMap);
 																	logger.info("签名公钥" + key);
 																	logger.info("待签数据" + linkStr);
-																	String hexSign = "";
+																	hexSign = "";
 																	try {
 																		hexSign = PayCore.md5Sign(linkStr, key);
 																	} catch (Exception e) {
 																		e.printStackTrace();
 																	}
 																	logger.info("签名数据:" + hexSign);
-																	requestMap.put("sign_info", hexSign);
-																	String requestStr = JSON.toJSONString(requestMap);
-																	url = "http://pay.unvpay.com/services/ysFast/addInfo";
-																	String respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
+																	requestMap2.put("sign_type", "MD5"); // md5签名
+																	requestMap2.put("sign_info", hexSign);
+																	requestStr = JSON.toJSONString(requestMap2);
+																	url = "http://pay.unvpay.com/services/fastpay/openCard";
+																	respStr = HttpClientUtil.post(url, "UTF-8",
+																			requestStr);
 																	logger.info("返回值：" + respStr);
 																	json = JSONObject.parseObject(respStr);
-																	if ("0000".equals(json.getString("ret_code"))) {
-																		String app_id = json.getString("app_id");
-																		logger.info("上游返回的app_id：" + app_id);
-																		Map<String, String> requestMap1 = new HashMap<String, String>();
-
-																		requestMap1.put("merchId", "m1803070001"); // 支付系统分配给商户的机构号
-																		requestMap1.put("appId", app_id); // 商户号
-																		requestMap1.put("fastRate", originalinfo.getV_userFee());
-																		requestMap1.put("channel", "WLB");
-																		// 加密签名
-																		Map<String, ?> filterMap1 = null;
-																		try {
-																			filterMap1 = PayCore.paraFilter(requestMap1);
-																		} catch (Exception e1) {
-																			// TODO Auto-generated catch block
-																			e1.printStackTrace();
-																		}
-																		String linkStr1 = PayCore.createLinkString(filterMap1);
-																		logger.info("签名公钥" + key);
-																		logger.info("待签数据" + linkStr1);
-																		String hexSign1 = "";
-																		try {
-																			hexSign1 = PayCore.md5Sign(linkStr1, key);
-																		} catch (Exception e) {
-																			e.printStackTrace();
-																		}
-																		logger.info("签名数据:" + hexSign1);
-																		requestMap1.put("sign_info", hexSign1);
-																		String requestStr1 = JSON.toJSONString(requestMap1);
-
-																		url = "http://pay.unvpay.com/services/ysFast/addRate";
-																		String respStr1 = HttpClientUtil.post(url, "UTF-8", requestStr1);
-																		logger.info("返回值：" + respStr1);
-																		json = JSONObject.parseObject(respStr1);
-																		if ("0000".equals(json.getString("ret_code"))) {
-																			app_id = json.getString("app_id");
-																			logger.info("上游返回的app_id：" + app_id);
-																			PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
-																			merchartInfo.setAccount(app_id);// 账号
-																			merchartInfo.setMerchartId(originalinfo.getV_mid());
-																			merchartInfo.setMerchartName(merchantList.get(0).getMercName());
-																			merchartInfo.setMerchartNameSort(merchantList.get(0).getShortname());
-																			merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
-																			merchartInfo.setCardNo(originalinfo.getV_settleCardNo());// 卡号
-																			merchartInfo.setRealName(originalinfo.getV_settleName());// 姓名
-																			merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
-																			// merchartInfo.setAccountType(payRequest.getBusinessType());//账户类型
-																			merchartInfo.setBankName(bank.getBank_name());// 开户行
-																			merchartInfo.setPmsBankNo(originalinfo.getV_settlePmsBankNo());// 联行号
-																			merchartInfo.setProvince(bank.getBank_province());// 省份
-																			merchartInfo.setCity(bank.getBank_city());// 城市
-																			merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
-																			// merchartInfo.setWithdrawDepositSingleFee(payRequest.getWithdrawDepositSingleFee());//提现单笔手续费
-																			merchartInfo.setoAgentNo("100333");
-																			merchartInfo.setRateCode(originalinfo.getV_mid());
-																			int i = weixinService.updateRegister(merchartInfo);
-																			if (i > 0) {
-																				PmsWeixinMerchartInfo pm = new PmsWeixinMerchartInfo();
-
-																				pm.setCardNo(originalinfo.getV_cardNo());
-																				pm.setRealName(originalinfo.getV_realName());
-																				pm.setCertNo(originalinfo.getV_cert_no());
-																				pm.setMobile(originalinfo.getV_phone());
-
-																				PmsWeixinMerchartInfo pwm = weixinService.selectByCardEntity(pm);
-
-																				logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(pwm));
-																				if (pwm == null) {
-																					Map<String, String> requestMap2 = new HashMap<String, String>();
-																					requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
-																					requestMap2.put("app_id", app_id); // appId
-																					requestMap2.put("account_no", originalinfo.getV_cardNo()); // 银行账号
-																					requestMap2.put("mobile", originalinfo.getV_phone()); // 银行预留电话，不填则使用进件电话
-																					if ("1".equals(originalinfo.getV_accountType())) {
-																						requestMap2.put("card_type", "01"); // 卡类型
-																					} else if ("2".equals(originalinfo.getV_accountType())) {
-																						requestMap2.put("card_type", "02"); // 卡类型
-																					}
-
-																					String call_back_url = BaseUtil.url
-																							+ "/quickPayAction/syysReturnUrl.action?order_num="
-																							+ originalinfo.getV_oid();
-
-																					requestMap2.put("call_back_url", call_back_url); // 跳转页面地址
-																					requestMap2.put("notify_url",
-																							BaseUtil.url + "/quickPayAction/syysNotifyUrl.action"); // 接收异步通知地址
-																					requestMap2.put("open_type", "JF_OPEN"); // 开卡类型，为空，默认为UNION_PAY_OPEN
-																					requestMap2.put("channel", "WLB"); // 渠道
-																					requestMap2.put("version", "V2.1.1"); // 版本编号
-																					requestMap2.put("charset", "UTF-8"); // 字符编码
-
-																					// 得到带签名数据
-																					filterMap = PayCore.paraFilter(requestMap2);
-
-																					linkStr = PayCore.createLinkString(filterMap);
-																					logger.info("签名公钥" + key);
-																					logger.info("待签数据" + linkStr);
-																					hexSign = "";
-																					try {
-																						hexSign = PayCore.md5Sign(linkStr, key);
-																					} catch (Exception e) {
-																						e.printStackTrace();
-																					}
-																					logger.info("签名数据:" + hexSign);
-																					requestMap2.put("sign_type", "MD5"); // md5签名
-																					requestMap2.put("sign_info", hexSign);
-																					requestStr = JSON.toJSONString(requestMap2);
-																					url = "http://pay.unvpay.com/services/fastpay/openCard";
-																					respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
-																					logger.info("返回值：" + respStr);
-																					json = JSONObject.parseObject(respStr);
-																					if ("0000".equals(json.get("ret_code"))) {
-																						String param = json.getString("ret_data");
-																						JSONObject jb = JSONObject.parseObject(param);
-																						String auth_id = (String) jb.get("auth_id");
-																						merchartInfo = new PmsWeixinMerchartInfo();
-																						merchartInfo.setAccount(auth_id);// 账号
-																						merchartInfo.setMerchartId(originalinfo.getV_mid());
-																						merchartInfo.setMerchartName(merchantList.get(0).getMercName());
-																						merchartInfo
-																								.setMerchartNameSort(merchantList.get(0).getShortname());
-																						merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
-																						merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
-																						merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
-																						merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
-																						merchartInfo.setBankName(bank.getBank_name());// 开户行
-																						merchartInfo.setProvince(bank.getBank_province());// 省份
-																						merchartInfo.setCity(bank.getBank_city());// 城市
-																						merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
-																						merchartInfo.setoAgentNo("100333");
-																						merchartInfo.setRateCode(originalinfo.getV_mid());
-																						i = weixinService.updateRegister(merchartInfo);
-																						if (i > 0) {
-																							OriginalOrderInfo oo = new OriginalOrderInfo();
-																							oo.setByUser(app_id);
-																							oo.setSumCode(auth_id);
-																							oo.setOrderId(originalinfo.getV_oid());
-																							num = originalDao.update(oo);
-																							if (num > 0) {
-																								url = (String) jb.get("qr_code");
-																								logger.info("沈阳银盛返回的url:" + url);
-																								retMap.put("url", url);
-																								retMap.put("v_code", "00000");
-																								retMap.put("v_msg", "请求成功");
-																							} else {
-																								logger.info("app_id修改失败!");
-																							}
-																						}
-
-																					} else {
-
-																						retMap.put("v_code", "15");
-																						retMap.put("v_msg", "请求失败");
-																						return retMap;
-																					}
-																				} else {
-																					logger.info("沈阳银盛进件app_id:" + model.getAccount());
-																					logger.info("沈阳银盛进件:auth_id" + pwm.getAccount());
-																					Map<String, String> requestMap2 = new HashMap<String, String>();
-																					requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
-																					requestMap2.put("app_id", model.getAccount()); // appId
-																					requestMap2.put("auth_id", pwm.getAccount()); // 银行账号
-																					Double amount = Double.parseDouble(originalinfo.getV_txnAmt());
-																					Integer number1 = amount.intValue();
-																					requestMap2.put("amount", number1.toString());
-																					requestMap2.put("encrypt", "T0"); // 卡类
-
-																					key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
-																					// 得到带签名数据
-																					filterMap = PayCore.paraFilter(requestMap2);
-
-																					linkStr = PayCore.createLinkString(filterMap);
-																					logger.info("沈阳银盛签名公钥" + key);
-																					logger.info("沈阳银盛待签数据" + linkStr);
-																					hexSign = PayCore.md5Sign(linkStr, key);
-																					logger.info("沈阳银盛签名数据:" + hexSign);
-																					requestMap2.put("sign_type", "MD5"); // md5签名
-																					requestMap2.put("sign_info", hexSign);
-																					requestStr = JSON.toJSONString(requestMap2);
-
-																					url = "http://pay.unvpay.com/services/fastpay/submitOrder";
-																					respStr = xdt.quickpay.syys.HttpClientUtil.post(url, "UTF-8",
-																							requestStr);
-
-																					logger.info("沈阳银盛短信返回值：" + respStr);
-																					json = com.alibaba.fastjson.JSONObject.parseObject(respStr);
-																					if ("0000".equals(json.getString("ret_code"))) {
-
-																						JSONObject jb = json.getJSONObject("ret_data");
-																						String param = jb.getString("parmMap");
-																						logger.info("沈阳银盛短信返回的ret_data：" + param);
-																						JSONObject jb1 = JSONObject.parseObject(param);
-																						String token = jb1.getString("token");
-																						logger.info("沈阳银盛短信返回的token：" + token);
-																						OriginalOrderInfo oo = new OriginalOrderInfo();
-																						oo.setOrderId(originalinfo.getV_oid());
-																						oo.setSumCode(token);
-																						oo.setByUser(model.getAccount());
-																						;
-																						oo.setProcdutNum("0000");
-																						num = originalDao.update(oo);
-																						if (num > 0) {
-																							retMap.put("v_mid", originalinfo.getV_mid());
-																							retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																							retMap.put("v_time", originalinfo.getV_time());
-																							retMap.put("v_code", "00");
-																							retMap.put("v_msg", "请求成功");
-																							retMap.put("v_oid", originalinfo.getV_oid());
-																						}
-																					}
-
-																				}
-
+																	if ("0000".equals(json.get("ret_code"))) {
+																		String param = json.getString("ret_data");
+																		JSONObject jb = JSONObject.parseObject(param);
+																		String auth_id = (String) jb.get("auth_id");
+																		merchartInfo = new PmsWeixinMerchartInfo();
+																		merchartInfo.setAccount(auth_id);// 账号
+																		merchartInfo
+																				.setMerchartId(originalinfo.getV_mid());
+																		merchartInfo.setMerchartName(
+																				merchantList.get(0).getMercName());
+																		merchartInfo.setMerchartNameSort(
+																				merchantList.get(0).getShortname());
+																		merchartInfo
+																				.setCertNo(originalinfo.getV_cert_no());// 证件号
+																		merchartInfo
+																				.setCardNo(originalinfo.getV_cardNo());// 卡号
+																		merchartInfo.setRealName(
+																				originalinfo.getV_realName());// 姓名
+																		merchartInfo
+																				.setMobile(originalinfo.getV_phone());// 手机号
+																		merchartInfo.setBankName(bank.getBank_name());// 开户行
+																		merchartInfo
+																				.setProvince(bank.getBank_province());// 省份
+																		merchartInfo.setCity(bank.getBank_city());// 城市
+																		merchartInfo.setDebitRate(
+																				originalinfo.getV_userFee());// 借记卡费率
+																		merchartInfo.setoAgentNo("100333");
+																		merchartInfo
+																				.setRateCode(originalinfo.getV_mid());
+																		i = weixinService.updateRegister(merchartInfo);
+																		if (i > 0) {
+																			OriginalOrderInfo oo = new OriginalOrderInfo();
+																			oo.setByUser(app_id);
+																			oo.setSumCode(auth_id);
+																			oo.setOrderId(originalinfo.getV_oid());
+																			num = originalDao.update(oo);
+																			if (num > 0) {
+																				url = (String) jb.get("qr_code");
+																				logger.info("沈阳银盛返回的url:" + url);
+																				retMap.put("url", url);
+																				retMap.put("v_code", "00000");
+																				retMap.put("v_msg", "请求成功");
+																			} else {
+																				logger.info("app_id修改失败!");
 																			}
-
-																		} else {
-																			retMap.put("v_code", "15");
-																			retMap.put("v_msg", "请求失败");
-																			return retMap;
 																		}
 
 																	} else {
@@ -1944,827 +4230,918 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 																		retMap.put("v_msg", "请求失败");
 																		return retMap;
 																	}
-
 																} else {
 																	logger.info("沈阳银盛进件app_id:" + model.getAccount());
-																	PmsWeixinMerchartInfo pm = new PmsWeixinMerchartInfo();
+																	logger.info("沈阳银盛进件:auth_id" + pwm.getAccount());
+																	Map<String, String> requestMap2 = new HashMap<String, String>();
+																	requestMap2.put("order_num",
+																			originalinfo.getV_oid()); // 流水号
+																	requestMap2.put("app_id", model.getAccount()); // appId
+																	requestMap2.put("auth_id", pwm.getAccount()); // 银行账号
+																	Double amount = Double
+																			.parseDouble(originalinfo.getV_txnAmt());
+																	Integer number1 = amount.intValue();
+																	requestMap2.put("amount", number1.toString());
+																	requestMap2.put("encrypt", "T0"); // 卡类
 
-																	pm.setCardNo(originalinfo.getV_cardNo());
-																	pm.setRealName(originalinfo.getV_realName());
-																	pm.setCertNo(originalinfo.getV_cert_no());
-																	pm.setMobile(originalinfo.getV_phone());
+																	key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+																	// 得到带签名数据
+																	filterMap = PayCore.paraFilter(requestMap2);
 
-																	PmsWeixinMerchartInfo pwm = weixinService.selectByCardEntity(pm);
+																	linkStr = PayCore.createLinkString(filterMap);
+																	logger.info("沈阳银盛签名公钥" + key);
+																	logger.info("沈阳银盛待签数据" + linkStr);
+																	hexSign = PayCore.md5Sign(linkStr, key);
+																	logger.info("沈阳银盛签名数据:" + hexSign);
+																	requestMap2.put("sign_type", "MD5"); // md5签名
+																	requestMap2.put("sign_info", hexSign);
+																	requestStr = JSON.toJSONString(requestMap2);
 
-																	logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(pwm));
-																	if (pwm == null) {
+																	url = "http://pay.unvpay.com/services/fastpay/submitOrder";
+																	respStr = xdt.quickpay.syys.HttpClientUtil.post(url,
+																			"UTF-8", requestStr);
 
-																		String app_id = model.getAccount().replaceAll(" ", "");
-																		Map<String, String> requestMap2 = new HashMap<String, String>();
+																	logger.info("沈阳银盛短信返回值：" + respStr);
+																	json = com.alibaba.fastjson.JSONObject
+																			.parseObject(respStr);
+																	if ("0000".equals(json.getString("ret_code"))) {
 
-																		requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
-																		requestMap2.put("app_id", app_id); // appId
-																		requestMap2.put("account_no", originalinfo.getV_cardNo()); // 银行账号
-																		requestMap2.put("mobile", originalinfo.getV_phone()); // 银行预留电话，不填则使用进件电话
-																		if ("1".equals(originalinfo.getV_accountType())) {
-																			requestMap2.put("card_type", "01"); // 卡类型
-																		} else if ("2".equals(originalinfo.getV_accountType())) {
-																			requestMap2.put("card_type", "02"); // 卡类型
-																		}
-
-																		String call_back_url = BaseUtil.url
-																				+ "/quickPayAction/syysReturnUrl.action?order_num="
-																				+ originalinfo.getV_oid();
-
-																		requestMap2.put("call_back_url", call_back_url); // 跳转页面地址
-																		requestMap2.put("notify_url",
-																				BaseUtil.url + "/quickPayAction/syysNotifyUrl.action"); // 接收异步通知地址
-																		requestMap2.put("open_type", "JF_OPEN"); // 开卡类型，为空，默认为UNION_PAY_OPEN
-																		requestMap2.put("channel", "WLB"); // 渠道
-																		requestMap2.put("version", "V2.1.1"); // 版本编号
-																		requestMap2.put("charset", "UTF-8"); // 字符编码
-																		String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
-																		// 得到带签名数据
-																		Map<String, ?> filterMap = PayCore.paraFilter(requestMap2);
-
-																		String linkStr = PayCore.createLinkString(filterMap);
-																		logger.info("签名公钥" + key);
-																		logger.info("待签数据" + linkStr);
-																		String hexSign = "";
-																		try {
-																			hexSign = PayCore.md5Sign(linkStr, key);
-																		} catch (Exception e) {
-																			e.printStackTrace();
-																		}
-																		logger.info("签名数据:" + hexSign);
-																		requestMap2.put("sign_type", "MD5"); // md5签名
-																		requestMap2.put("sign_info", hexSign);
-																		String requestStr = JSON.toJSONString(requestMap2);
-																		url = "http://pay.unvpay.com/services/fastpay/openCard";
-																		String respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
-																		logger.info("返回值：" + respStr);
-																		json = JSONObject.parseObject(respStr);
-																		if ("0000".equals(json.get("ret_code"))) {
-																			String param = json.getString("ret_data");
-																			JSONObject jb = JSONObject.parseObject(param);
-																			String auth_id = (String) jb.get("auth_id");
-																			PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
-																			merchartInfo.setAccount(auth_id);// 账号
-																			merchartInfo.setMerchartId(originalinfo.getV_mid());
-																			merchartInfo.setMerchartName(merchantList.get(0).getMercName());
-																			merchartInfo.setMerchartNameSort(merchantList.get(0).getShortname());
-																			merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
-																			merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
-																			merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
-																			merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
-																			merchartInfo.setBankName(bank.getBank_name());// 开户行
-																			merchartInfo.setProvince(bank.getBank_province());// 省份
-																			merchartInfo.setCity(bank.getBank_city());// 城市
-																			merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
-																			merchartInfo.setoAgentNo("100333");
-																			merchartInfo.setRateCode(originalinfo.getV_mid());
-																			int i = weixinService.updateRegister(merchartInfo);
-																			if (i > 0) {
-																				OriginalOrderInfo oo = new OriginalOrderInfo();
-																				oo.setByUser(app_id);
-																				oo.setSumCode(auth_id);
-																				oo.setOrderId(originalinfo.getV_oid());
-																				num = originalDao.update(oo);
-																				if (num > 0) {
-																					url = (String) jb.get("qr_code");
-																					logger.info("沈阳银盛返回的url:" + url);
-																					retMap.put("url", url);
-																					retMap.put("v_code", "00000");
-																					retMap.put("v_msg", "请求成功");
-																				} else {
-																					logger.info("app_id修改失败!");
-																				}
-																			}
-
-																		} else {
-
-																			retMap.put("v_code", "15");
-																			retMap.put("v_msg", "请求失败");
-																			return retMap;
-																		}
-
-																	} else {
-																		logger.info("沈阳银盛进件app_id:" + model.getAccount());
-																		logger.info("沈阳银盛进件:auth_id" + pwm.getAccount());
-																		Map<String, String> requestMap2 = new HashMap<String, String>();
-																		requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
-																		requestMap2.put("app_id", model.getAccount()); // appId
-																		requestMap2.put("auth_id", pwm.getAccount()); // 银行账号
-																		Double amount = Double.parseDouble(originalinfo.getV_txnAmt());
-																		Integer number1 = amount.intValue();
-																		requestMap2.put("amount", number1.toString());
-																		requestMap2.put("encrypt", "T0"); // 卡类
-
-																		String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
-																		// 得到带签名数据
-																		Map<String, ?> filterMap = PayCore.paraFilter(requestMap2);
-
-																		String linkStr = PayCore.createLinkString(filterMap);
-																		logger.info("沈阳银盛签名公钥" + key);
-																		logger.info("沈阳银盛待签数据" + linkStr);
-																		String hexSign = PayCore.md5Sign(linkStr, key);
-																		logger.info("沈阳银盛签名数据:" + hexSign);
-																		requestMap2.put("sign_type", "MD5"); // md5签名
-																		requestMap2.put("sign_info", hexSign);
-																		String requestStr = JSON.toJSONString(requestMap2);
-
-																		url = "http://pay.unvpay.com/services/fastpay/submitOrder";
-																		String respStr = xdt.quickpay.syys.HttpClientUtil.post(url, "UTF-8", requestStr);
-
-																		logger.info("沈阳银盛短信返回值：" + respStr);
-																		json = com.alibaba.fastjson.JSONObject.parseObject(respStr);
-																		if ("0000".equals(json.getString("ret_code"))) {
-
-																			JSONObject jb = json.getJSONObject("ret_data");
-																			String param = jb.getString("parmMap");
-																			logger.info("沈阳银盛短信返回的ret_data：" + param);
-																			JSONObject jb1 = JSONObject.parseObject(param);
-																			String token = jb1.getString("token");
-																			logger.info("沈阳银盛短信返回的token：" + token);
-																			OriginalOrderInfo oo = new OriginalOrderInfo();
-																			oo.setOrderId(originalinfo.getV_oid());
-																			oo.setSumCode(token);
-																			oo.setByUser(model.getAccount());
-																			;
-																			oo.setProcdutNum("0000");
-																			num = originalDao.update(oo);
-																			if (num > 0) {
-																				retMap.put("v_mid", originalinfo.getV_mid());
-																				retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																				retMap.put("v_time", originalinfo.getV_time());
-																				retMap.put("v_code", "00");
-																				retMap.put("v_msg", "请求成功");
-																				retMap.put("v_oid", originalinfo.getV_oid());
-																			}
-																		}
-
-																	}
-
-																}
-
-																break;
-
-															case "HJZF":// 汇聚快捷获取短信验证码
-																Map<String, String> result = new HashMap<>();
-																StringBuilder strs = new StringBuilder();
-																strs.append(HJUtil.Version2);
-																strs.append(pmsBusinessPos.getBusinessnum());// pmsBusinessPos.getBusinessnum()
-																strs.append(originalinfo.getV_productDesc());
-																strs.append(originalinfo.getV_oid());
-																strs.append(originalinfo.getV_txnAmt());
-																strs.append("1");
-																strs.append("FAST");
-																strs.append(originalinfo.getV_realName());
-																strs.append("1");
-																strs.append(originalinfo.getV_cert_no());
-																strs.append(originalinfo.getV_cardNo());
-																strs.append(originalinfo.getV_expired() == null ? "" : originalinfo.getV_expired());// YYYY-MM
-																strs.append(originalinfo.getV_cvn2() == null ? "" : originalinfo.getV_cvn2());
-																strs.append(originalinfo.getV_phone());
-																// strs.append(originalinfo.getV_attach() == null ? "" :
-																// originalinfo.getV_attach());
-																logger.info("汇聚待签名数据:" + strs.toString());
-																// String hmac =MD5Utils.sign(str.toString(), HJUtil.privateKey,
-																// "UTF-8");//RSAUtils.sign(str.toString().getBytes("UTF-8"),
-																// HJUtil.privateKey);
-																String hmac = DigestUtils.md5Hex(strs.toString() + pmsBusinessPos.getKek());// pmsBusinessPos.getKek()
-																result.put("p0_Version", HJUtil.Version2);
-																result.put("p1_MerchantNo", pmsBusinessPos.getBusinessnum());
-																result.put("p2_MerchantName", URLEncoder.encode(originalinfo.getV_productDesc(), "utf-8"));
-																result.put("q1_OrderNo", originalinfo.getV_oid());
-																result.put("q2_Amount", originalinfo.getV_txnAmt());
-																result.put("q3_Cur", "1");
-																result.put("q8_FrpCode", "FAST");
-																result.put("s1_PayerName", URLEncoder.encode(originalinfo.getV_realName(), "utf-8"));
-																result.put("s2_PayerCardType", "1");
-																result.put("s3_PayerCardNo", originalinfo.getV_cert_no());
-																result.put("s4_PayerBankCardNo", originalinfo.getV_cardNo());
-																if (originalinfo.getV_expired() != null && originalinfo.getV_expired() != "") {
-																	result.put("s5_BankCardExpire", originalinfo.getV_expired());
-																}
-																if (originalinfo.getV_cvn2() != null && originalinfo.getV_cvn2() != "") {
-																	result.put("s6_CVV2", originalinfo.getV_cvn2());
-																}
-																result.put("s7_BankMobile", originalinfo.getV_phone());
-																// if (originalinfo.getV_attach() != null && originalinfo.getV_attach() != "") {
-																// result.put("t1_ext", originalinfo.getV_attach());
-																// }
-																result.put("hmac", URLEncoder.encode(hmac, "utf-8"));
-																TreeMap<String, String> paramsMap = new TreeMap<>();
-																paramsMap.putAll(result);
-																String paramSrc = RequestUtils.getParamSrc(paramsMap);
-																logger.info("汇聚快捷支付给上游发送的数据:" + paramSrc);
-																// String retuString = RequestUtils.sendPost(HJUtil.scanCodePay,
-																// "hmac=ab00408505d7fa77077a760a3bb0cb47&p0_Version=2.0&p1_MerchantNo=888101700005315&p2_MerchantName=测试商品&q1_OrderNo=QP20180411143509323540&q2_Amount=1&q3_Cur=1&q8_FrpCode=FAST&s1_PayerName=李娟&s2_PayerCardType=1&s3_PayerCardNo=120105197510055420&s4_PayerBankCardNo=6228450028016697770&s7_BankMobile=13323358548"
-																// );
-																String retuString = PostUtils.doPost(HJUtil.quickPay, paramsMap);
-																// HttpService HT = new HttpService();
-																// String retuString = HT.POSTReturnString(HJUtil.quickPay, result,
-																// MBUtil.codeG);
-																logger.info("汇聚返回字符串参数：" + retuString);
-																net.sf.json.JSONObject jsons = net.sf.json.JSONObject.fromObject(retuString);
-																if ("100".equals(jsons.get("ra_Status"))) {
-																	retMap.put("v_code", "00");
-																	retMap.put("v_msg", jsons.getString("rb_Msg"));
-																	retMap.put("v_oid", originalinfo.getV_oid());
-																	retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-
-																} else {
-																	retMap.put("v_code", "01");
-																	retMap.put("v_msg", jsons.getString("rb_Msg"));
-																}
-																break;
-															case "JBB":// 聚佰宝快捷
-																weixin = new PmsWeixinMerchartInfo();
-
-																weixin.setCardNo(originalinfo.getV_settleCardNo());
-																weixin.setRealName(originalinfo.getV_settleName());
-																weixin.setCertNo(originalinfo.getV_cert_no());
-																weixin.setMobile(originalinfo.getV_phone());
-
-																model = weixinService.selectByCardEntity(weixin);
-
-																logger.info("聚佰宝快捷原订单数据:" + JSON.toJSON(model));
-
-																if (model.getAccount() == null) {
-																	// 商户编号
-																	String merchantId = "888201711290115";
-																	// 业务代码
-																	String bussId = "ONL0003";
-																	String key = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC35dOgycZisH24maQMHKVF4B/UNcyJULOJKCS6PUPhiLZAdPgR6ulwoWTtmN8v58PX4TDculU88aFz9CSlpfA72r0bHhhzDJdBP2Ki2Rc/RHwu6vrF9tbv0EPL7db/ECZe7CPZykLn/5JRlVpbsQWsx7gqQaiOY2nw4U6Lo13UoQIDAQAB";
-																	RSAPublicKey publicKey = RSAEncrypt.loadPublicKeyByStr(key);
-																	String certNo = originalinfo.getV_cert_no();
-																	byte[] cipherData = RSAEncrypt.encrypt(publicKey, certNo.getBytes("UTF-8"));
-																	// rsa 加密之后的卡号
-																	String rsacertNo = xdt.quickpay.jbb.util.Base64.encode(cipherData);
-
-																	// 订单信息
-																	String merOrderNum = originalinfo.getV_oid();
-
-																	// 前台回调
-																	String frontUrl = BaseUtil.url + "/quickPayAction/jbbNotifyUrl.action";
-																	// 签名数据
-																	String txnString = "bussId=" + bussId + "&certNo=" + rsacertNo + "&frontUrl=" + frontUrl
-																			+ "&merchantId=" + merchantId + "&merOrderNum=" + merOrderNum + "&";
-																	logger.info("聚佰宝上送的数据加密字符串:" + txnString);
-																	MD5 md = new MD5();
-																	String signValue = md.getMD5ofStr(txnString + "675FC1ctf2Y6zVm3");
-
-																	String txn = "bussId=" + bussId + "&certNo=" + URLEncoder.encode(rsacertNo, "utf-8")
-																			+ "&frontUrl=" + frontUrl + "&merchantId=" + merchantId + "&merOrderNum="
-																			+ merOrderNum + "&signValue=" + signValue;
-
-																	logger.info("聚佰宝上送的数据:" + txn);
-
-																	url = "https://cashier.etonepay.com/NetPay/quickPaySign.action?" + txn;
-
-																	HttpURLConection http = new HttpURLConection();
-
-																	HttpUtil h = new HttpUtil();
-
-																	String resonpe = http.httpURLConnectionPOST(
-																			"https://cashier.etonepay.com/NetPay/quickPaySign.action", txn);
-																	logger.info("响应结果:" + resonpe);
-																	net.sf.json.JSONObject ob = net.sf.json.JSONObject.fromObject(resonpe);
-																	Iterator it = ob.keys();
-																	String respCode = "";
-																	String html = "";
-																	while (it.hasNext()) {
-																		key = (String) it.next();
-																		if (key.equals("respCode")) {
-
-																			respCode = ob.getString(key);
-
-																			logger.info("聚佰宝签约响应状态码:" + respCode);
-
-																		}
-																		if (key.equals("html")) {
-
-																			html = ob.getString(key);
-
-																			logger.info("聚佰宝签约html:" + html);
-																		}
-																	}
-																	if ("0000".equals(respCode)) {
-																		retMap.put("v_code", "00000");
-																		retMap.put("v_msg", "请求成功");
-																		retMap.put("html", html);
-																	}
-
-																} else {
-
-																	logger.info("##################聚佰宝获取短信接口##########");
-																	// 商户编号
-																	String merchantId = "888201711290115";
-																	// 业务代码
-																	String bussId = "ONL0003";
-																	Integer amount = (int) (Double.parseDouble(originalinfo.getV_txnAmt()) * 100);
-
-																	String tranAmt = amount.toString();
-
-																	String protocolNo = "";
-
-																	// 订单信息
-																	String merOrderNum = originalinfo.getV_oid();
-																	// 签名数据
-																	String txnString = "bussId=" + bussId + "&merchantId=" + merchantId + "&merOrderNum="
-																			+ merOrderNum + "&protocolNo=" + protocolNo + "&tranAmt=" + tranAmt + "&";
-																	logger.info("聚佰宝上送的数据加密字符串:" + txnString);
-																	MD5 md = new MD5();
-																	String signValue = md.getMD5ofStr(txnString + "675FC1ctf2Y6zVm3");
-
-																	String txn = "bussId=" + bussId + "&merchantId=" + merchantId + "&merOrderNum="
-																			+ merOrderNum + "&protocolNo=" + protocolNo + "&tranAmt=" + tranAmt.toString()
-																			+ "&signValue=" + signValue;
-
-																	logger.info("聚佰宝上送的数据:" + txn);
-
-																	url = "https://cashier.etonepay.com/NetPay/quickPaySms.action?" + txn;
-
-																	HttpURLConection http = new HttpURLConection();
-
-																	HttpUtil h = new HttpUtil();
-
-																	String resonpe = http.httpURLConnectionPOST(
-																			"https://cashier.etonepay.com/NetPay/quickPaySms.action", txn);
-																	logger.info("响应结果:" + resonpe);
-																	net.sf.json.JSONObject ob = net.sf.json.JSONObject.fromObject(resonpe);
-																	Iterator it = ob.keys();
-																	String transId = "";
-
-																	String respCode = "";
-																	while (it.hasNext()) {
-																		String key = (String) it.next();
-																		if (key.equals("respCode")) {
-
-																			respCode = ob.getString(key);
-
-																			logger.info("聚佰宝签约响应状态码:" + respCode);
-
-																		}
-																		if (key.equals("merOrderNum")) {
-
-																			merOrderNum = ob.getString(key);
-
-																			logger.info("聚佰宝签约html:" + merOrderNum);
-																		}
-																		if (key.equals("transId")) {
-
-																			transId = ob.getString(key);
-
-																			logger.info("聚佰宝签约transId:" + transId);
-																		}
-																	}
-																	if ("0000".equals(respCode)) {
-																		OriginalOrderInfo info = new OriginalOrderInfo();
-																		info.setOrderId(merOrderNum);
-																		info.setByUser(transId);// 商户号
-																		info.setBankId(protocolNo);
-																		number = originalDao.update(info);
-																		if (number > 0) {
-																			retMap.put("v_oid", originalinfo.getV_oid());
-																			retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																		JSONObject jb = json.getJSONObject("ret_data");
+																		String param = jb.getString("parmMap");
+																		logger.info("沈阳银盛短信返回的ret_data：" + param);
+																		JSONObject jb1 = JSONObject.parseObject(param);
+																		String token = jb1.getString("token");
+																		logger.info("沈阳银盛短信返回的token：" + token);
+																		OriginalOrderInfo oo = new OriginalOrderInfo();
+																		oo.setOrderId(originalinfo.getV_oid());
+																		oo.setSumCode(token);
+																		oo.setByUser(model.getAccount());
+																		;
+																		oo.setProcdutNum("0000");
+																		num = originalDao.update(oo);
+																		if (num > 0) {
+																			retMap.put("v_mid",
+																					originalinfo.getV_mid());
+																			retMap.put("v_txnAmt",
+																					originalinfo.getV_txnAmt());
+																			retMap.put("v_time",
+																					originalinfo.getV_time());
 																			retMap.put("v_code", "00");
 																			retMap.put("v_msg", "请求成功");
-																			retMap.put("v_time", originalinfo.getV_time());
-																			retMap.put("v_mid", originalinfo.getV_mid());
+																			retMap.put("v_oid",
+																					originalinfo.getV_oid());
 																		}
 																	}
 
 																}
 
-																break;
-															case "YFWG":// 裕福快捷
-																DecimalFormat df1 = new DecimalFormat("######0"); // 四色五入转换成整数
-																if (originalinfo.getV_userId() == null || "".equals(originalinfo.getV_userId())) {
-																	retMap.put("v_code", "01");
-																	retMap.put("v_msg", "v_userId is null");
-																	return retMap;
+															}
+
+														} else {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+															return retMap;
+														}
+
+													} else {
+
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+														return retMap;
+													}
+
+												} else {
+													logger.info("沈阳银盛进件app_id:" + model.getAccount());
+													PmsWeixinMerchartInfo pm = new PmsWeixinMerchartInfo();
+
+													pm.setCardNo(originalinfo.getV_cardNo());
+													pm.setRealName(originalinfo.getV_realName());
+													pm.setCertNo(originalinfo.getV_cert_no());
+													pm.setMobile(originalinfo.getV_phone());
+
+													PmsWeixinMerchartInfo pwm = weixinService.selectByCardEntity(pm);
+
+													logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(pwm));
+													if (pwm == null) {
+
+														String app_id = model.getAccount().replaceAll(" ", "");
+														Map<String, String> requestMap2 = new HashMap<String, String>();
+
+														requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
+														requestMap2.put("app_id", app_id); // appId
+														requestMap2.put("account_no", originalinfo.getV_cardNo()); // 银行账号
+														requestMap2.put("mobile", originalinfo.getV_phone()); // 银行预留电话，不填则使用进件电话
+														if ("1".equals(originalinfo.getV_accountType())) {
+															requestMap2.put("card_type", "01"); // 卡类型
+														} else if ("2".equals(originalinfo.getV_accountType())) {
+															requestMap2.put("card_type", "02"); // 卡类型
+														}
+
+														String call_back_url = BaseUtil.url
+																+ "/quickPayAction/syysReturnUrl.action?order_num="
+																+ originalinfo.getV_oid();
+
+														requestMap2.put("call_back_url", call_back_url); // 跳转页面地址
+														requestMap2.put("notify_url",
+																BaseUtil.url + "/quickPayAction/syysNotifyUrl.action"); // 接收异步通知地址
+														requestMap2.put("open_type", "JF_OPEN"); // 开卡类型，为空，默认为UNION_PAY_OPEN
+														requestMap2.put("channel", "WLB"); // 渠道
+														requestMap2.put("version", "V2.1.1"); // 版本编号
+														requestMap2.put("charset", "UTF-8"); // 字符编码
+														String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+														// 得到带签名数据
+														Map<String, ?> filterMap = PayCore.paraFilter(requestMap2);
+
+														String linkStr = PayCore.createLinkString(filterMap);
+														logger.info("签名公钥" + key);
+														logger.info("待签数据" + linkStr);
+														String hexSign = "";
+														try {
+															hexSign = PayCore.md5Sign(linkStr, key);
+														} catch (Exception e) {
+															e.printStackTrace();
+														}
+														logger.info("签名数据:" + hexSign);
+														requestMap2.put("sign_type", "MD5"); // md5签名
+														requestMap2.put("sign_info", hexSign);
+														String requestStr = JSON.toJSONString(requestMap2);
+														url = "http://pay.unvpay.com/services/fastpay/openCard";
+														String respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
+														logger.info("返回值：" + respStr);
+														json = JSONObject.parseObject(respStr);
+														if ("0000".equals(json.get("ret_code"))) {
+															String param = json.getString("ret_data");
+															JSONObject jb = JSONObject.parseObject(param);
+															String auth_id = (String) jb.get("auth_id");
+															PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
+															merchartInfo.setAccount(auth_id);// 账号
+															merchartInfo.setMerchartId(originalinfo.getV_mid());
+															merchartInfo
+																	.setMerchartName(merchantList.get(0).getMercName());
+															merchartInfo.setMerchartNameSort(
+																	merchantList.get(0).getShortname());
+															merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
+															merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
+															merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
+															merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
+															merchartInfo.setBankName(bank.getBank_name());// 开户行
+															merchartInfo.setProvince(bank.getBank_province());// 省份
+															merchartInfo.setCity(bank.getBank_city());// 城市
+															merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
+															merchartInfo.setoAgentNo("100333");
+															merchartInfo.setRateCode(originalinfo.getV_mid());
+															int i = weixinService.updateRegister(merchartInfo);
+															if (i > 0) {
+																OriginalOrderInfo oo = new OriginalOrderInfo();
+																oo.setByUser(app_id);
+																oo.setSumCode(auth_id);
+																oo.setOrderId(originalinfo.getV_oid());
+																num = originalDao.update(oo);
+																if (num > 0) {
+																	url = (String) jb.get("qr_code");
+																	logger.info("沈阳银盛返回的url:" + url);
+																	retMap.put("url", url);
+																	retMap.put("v_code", "00000");
+																	retMap.put("v_msg", "请求成功");
+																} else {
+																	logger.info("app_id修改失败!");
 																}
-																final String merCertPath = new File(this.getClass().getResource("/").getPath())
-																		.getParentFile().getParentFile().getCanonicalPath() + "//ky//"
-																		+ pmsBusinessPos.getBusinessnum() + ".cer";
-																final String pfxPath = new File(this.getClass().getResource("/").getPath()).getParentFile()
-																		.getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum()
-																		+ ".pfx";
-																final String pfxPwd = pmsBusinessPos.getKek();
-																QuickReq req = new QuickReq();
-																YufuCipher cipher = null;
-																YufuCipherSupport instance = null;
-																cipher = YufuCipherSupport.getCipherInstance(merCertPath, pfxPath, pfxPwd, cipher,
-																		instance);
-																// YufuCipher cipher = YufuCipherSupport.getCipherInstance(merCertPath, pfxPath,
-																// pfxPwd);
-																try {
-																	List<Map<String, String>> list = new ArrayList<>();
-																	Map<String, String> reqMaps = new HashMap<>();
-																	req.setVersion("1.0.0");
-																	req.setMerchantId(pmsBusinessPos.getBusinessnum());
-																	req.setMerchantOrderId(originalinfo.getV_oid());
-																	req.setMerchantOrderTime(originalinfo.getV_time());
-																	BigDecimal payAmt = new BigDecimal(originalinfo.getV_txnAmt())
-																			.setScale(2, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100));
-																	req.setMerchantOrderAmt(df1.format(payAmt));
-																	// req.setMerchantDisctAmt(merchantDisctAmt);
-																	req.setMerchantOrderCurrency("156");
-																	req.setGwType("04");
-																	req.setBackUrl(YFUtil.notifyUrl);
-																	// req.setUserType("01");
-																	req.setMerchantUserId(originalinfo.getV_userId());
+															}
 
-																	// {cardInfoList=, respDesc=调用接口成功, merchantId=000001220100000470,
-																	// merchantUserId=1523167250194, version=1.0.0, respCode=0000}
-																	req.setMerchantSettleInfo("[{\"merchantId\":\"" + pmsBusinessPos.getBusinessnum()
-																			+ "\",\"merchantName\":\"" + originalinfo.getV_productDesc()
-																			+ "\",\"orderAmt\":\"" + df1.format(payAmt) + "\"," + "\"sumGoodsName \":\""
-																			+ originalinfo.getV_productDesc() + "\"}]");
+														} else {
 
-																	req.setMerchantOrderDesc(originalinfo.getV_productDesc());
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
+															return retMap;
+														}
 
-																	// req.setMerchantSettleInfo("[{\"merchantId\":\"000001110100000812\",\"merchantName\":\"商户00000111050000001\",\"orderAmt\":100,\"sumGoodsName\":\"我是00000111050000001的商品，哈哈哈\"}]"
-																	// );
-																	req.setMsgExt(originalinfo.getV_attach());
-																	// req.setMisc("");
+													} else {
+														logger.info("沈阳银盛进件app_id:" + model.getAccount());
+														logger.info("沈阳银盛进件:auth_id" + pwm.getAccount());
+														Map<String, String> requestMap2 = new HashMap<String, String>();
+														requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
+														requestMap2.put("app_id", model.getAccount()); // appId
+														requestMap2.put("auth_id", pwm.getAccount()); // 银行账号
+														Double amount = Double.parseDouble(originalinfo.getV_txnAmt());
+														Integer number1 = amount.intValue();
+														requestMap2.put("amount", number1.toString());
+														requestMap2.put("encrypt", "T0"); // 卡类
 
-																	if ("".equals(originalinfo.getV_verifyId()) || originalinfo.getV_verifyId() == null) {
-																		if ("".equals(originalinfo.getV_cardNo()) || originalinfo.getV_cardNo() == null) {
-																			retMap.put("v_code", "01");
-																			retMap.put("v_msg", "v_cardNo is null");
-																			return retMap;
-																		} else {
-																			reqMaps.put("cardNo", originalinfo.getV_cardNo());// originalinfo.getV_cardNo()
-																		}
-																		if ("1".equals(originalinfo.getV_accountType())) {
-																			reqMaps.put("cardType", "P1");
-																		} else if ("2".equals(originalinfo.getV_accountType())) {
-																			retMap.put("v_code", "01");
-																			retMap.put("v_msg", "此商户不支持贷记卡");
-																			return retMap;
-																			// reqMaps.put("cardType", "P2");
-																		} else {
-																			retMap.put("v_code", "01");
-																			retMap.put("v_msg", "v_accountType is null");
-																			return retMap;
-																		}
-																		if (!"".equals(originalinfo.getV_realName())
-																				&& originalinfo.getV_realName() != null) {
-																			reqMaps.put("name", originalinfo.getV_realName());
-																		} else {
-																			retMap.put("v_code", "01");
-																			retMap.put("v_msg", "v_realName is null");
-																			return retMap;
-																		}
-																		if (bank2 != null) {
-																			reqMaps.put("bankNo", bank2.getBank_code());
-																		} else {
-																			reqMaps.put("bankNo", "");
-																		}
-																		if (!"".equals(originalinfo.getV_cert_no())
-																				&& originalinfo.getV_cert_no() != null) {
-																			reqMaps.put("certNo", originalinfo.getV_cert_no());
-																		} else {
-																			retMap.put("v_code", "01");
-																			retMap.put("v_msg", "v_cert_no is null");
-																			return retMap;
-																		}
-																		reqMaps.put("certType", "01");
-																		reqMaps.put("phone", originalinfo.getV_phone());
-																		reqMaps.put("cvn2",
-																				originalinfo.getV_cvn2() == null ? "" : originalinfo.getV_cvn2());
-																		reqMaps.put("expired",
-																				originalinfo.getV_expired() == null ? "" : originalinfo.getV_expired());
-																		req.setPayCardList("[{\"cardNo\":\"" + reqMaps.get("cardNo") + "\",\"cardType\":\""
-																				+ reqMaps.get("cardType") + "\",\"bankNo\":\"" + reqMaps.get("bankNo")
-																				+ "\",\"certNo\":\"" + reqMaps.get("certNo")
-																				+ "\",\"certType\":\"01\",\"name\":\"" + reqMaps.get("name")
-																				+ "\",\"phone\":\"" + reqMaps.get("phone") + "\",\"cvn2\":\""
-																				+ reqMaps.get("cvn2") + "\",\"expired\":\"" + reqMaps.get("expired")
-																				+ "\"}]");
-																	} else {
-																		req.setVerifyId(originalinfo.getV_verifyId());
-																	}
+														String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
+														// 得到带签名数据
+														Map<String, ?> filterMap = PayCore.paraFilter(requestMap2);
 
-																	// req.setPayCardList("[{\"cardNo\":\""+originalinfo.getV_cardNo()+"\",\"cardType\":\"P1\",\"bankNo\":\"CDB\",\"certNo\":\""+originalinfo.getV_cert_no()+"\","
-																	// +
-																	// "\"certType\":\"01\",\"name\":\""+originalinfo.getV_realName()+"\",\"phone\":\""+originalinfo.getV_phone()+"\",\"cvn2\":\""+originalinfo.getV_cvn2()==null?"":originalinfo.getV_cvn2()+"\",\"expired\":\""+originalinfo.getV_expired()==null?"":originalinfo.getV_expired()+"\"}]");
-																	//
-																	// req.setPayCardList(JSONObject.toJSONString(list));
+														String linkStr = PayCore.createLinkString(filterMap);
+														logger.info("沈阳银盛签名公钥" + key);
+														logger.info("沈阳银盛待签数据" + linkStr);
+														String hexSign = PayCore.md5Sign(linkStr, key);
+														logger.info("沈阳银盛签名数据:" + hexSign);
+														requestMap2.put("sign_type", "MD5"); // md5签名
+														requestMap2.put("sign_info", hexSign);
+														String requestStr = JSON.toJSONString(requestMap2);
 
-																	String data = GsonUtil.objToJson(req);
-																	logger.info("data:" + data);
-																	Map<String, String> params = GsonUtil.jsonToObj(data, Map.class);
-																	ParamPacket bo = cipher.doPack(params);
-																	logger.info("11!:" + JSON.toJSON(bo));
-																	TreeMap<String, String> map_param = new TreeMap<>();
-																	map_param.put("merchantId", pmsBusinessPos.getBusinessnum());
-																	map_param.put("data", URLEncoder.encode(bo.getData(), "utf-8"));
-																	map_param.put("enc", URLEncoder.encode(bo.getEnc(), "utf-8"));
-																	map_param.put("sign", URLEncoder.encode(bo.getSign(), "utf-8"));
-																	String urlPay = "";
-																	if ("000001110100000812".equals(pmsBusinessPos.getBusinessnum())) {
-																		urlPay = "http://malltest.yfpayment.com/payment/service/payset.do";
-																	} else {
-																		urlPay = "http://www.yfpayment.com/payment/service/payset.do";
-																	}
-																	String returnStr = PostUtils.doPost(urlPay, map_param);
+														url = "http://pay.unvpay.com/services/fastpay/submitOrder";
+														String respStr = xdt.quickpay.syys.HttpClientUtil.post(url,
+																"UTF-8", requestStr);
 
-																	if (returnStr != null && !"".equals(returnStr)) {
-																		// 二、验签解密
-																		returnStr = URLDecoder.decode(returnStr, "utf-8");
-																		System.out.println("URL解码后的置单应答结果：" + returnStr);
-																		TreeMap<String, String> boMap = JSON.parseObject(returnStr,
-																				new TypeReference<TreeMap<String, String>>() {
-																				});
-																		Map<String, String> payshowParams = cipher.unPack(
-																				new ParamPacket(boMap.get("data"), boMap.get("enc"), boMap.get("sign")));
-																		System.out.println("解密后的置单应答结果：" + payshowParams);
-																		if ("0000".equals(payshowParams.get("respCode"))) {
-																			OriginalOrderInfo oo = new OriginalOrderInfo();
-																			oo.setOrderId(originalinfo.getV_oid());
-																			oo.setSumCode(payshowParams.get("token"));
-																			oo.setProcdutNum("0000");
-																			num = originalDao.update(oo);
-																			if (num > 0) {
-																				retMap.put("v_code", "00");
-																				retMap.put("v_msg", payshowParams.get("respDesc"));
-																				retMap.put("v_attach", payshowParams.get("msgExt"));
-																				retMap.put("v_oid", originalinfo.getV_oid());
-																				retMap.put("v_mid", originalinfo.getV_mid());
-																			} else {
-																				logger.info("app_id修改失败!");
-																				retMap.put("v_code", "01");
-																				retMap.put("v_msg", "系统错误,预下单失败");
-																			}
-																		} else {
-																			retMap.put("v_code", "01");
-																			retMap.put("v_msg", payshowParams.get("respDesc"));
-																		}
+														logger.info("沈阳银盛短信返回值：" + respStr);
+														json = com.alibaba.fastjson.JSONObject.parseObject(respStr);
+														if ("0000".equals(json.getString("ret_code"))) {
 
-																	} else {
-																		System.out.println("置单返回报文为空！");
-																	}
-																} catch (Exception e) {
-																	e.printStackTrace();
-																}
-																break;
-															case "GYY":// 柜银云快捷
-																Map<String, Object> infoMap = new HashMap<String, Object>();
-																infoMap.put("agentNo", "10033");// 机构号
-																infoMap.put("merName", originalinfo.getV_productDesc());// 商户名称
-																infoMap.put("merAddr", originalinfo.getV_attach());// 商户地址
-																infoMap.put("settleName", originalinfo.getV_realName());// 结算姓名
-																infoMap.put("settlePhone", originalinfo.getV_phone());// 手机号
-																infoMap.put("settleBank", bank.getBank_short_title());// 开户银行
-																infoMap.put("settleBankNo", bank.getBank_code());// 银行简码
-																infoMap.put("settleAccount", originalinfo.getV_settleCardNo());// 结算卡号
-																infoMap.put("settleBankSub", bank.getBank_name());// 开户支行
-																infoMap.put("settleBankBranch", originalinfo.getV_settlePmsBankNo());// 联行号
-																infoMap.put("settleSubProvince", bank.getBank_province());// 开户省
-																infoMap.put("settleSubCity", bank.getBank_city());// 开户市
+															JSONObject jb = json.getJSONObject("ret_data");
+															String param = jb.getString("parmMap");
+															logger.info("沈阳银盛短信返回的ret_data：" + param);
+															JSONObject jb1 = JSONObject.parseObject(param);
+															String token = jb1.getString("token");
+															logger.info("沈阳银盛短信返回的token：" + token);
+															OriginalOrderInfo oo = new OriginalOrderInfo();
+															oo.setOrderId(originalinfo.getV_oid());
+															oo.setSumCode(token);
+															oo.setByUser(model.getAccount());
+															;
+															oo.setProcdutNum("0000");
+															num = originalDao.update(oo);
+															if (num > 0) {
+																retMap.put("v_mid", originalinfo.getV_mid());
+																retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																retMap.put("v_time", originalinfo.getV_time());
+																retMap.put("v_code", "00");
+																retMap.put("v_msg", "请求成功");
+																retMap.put("v_oid", originalinfo.getV_oid());
+															}
+														}
 
-																infoMap.put("settleIdCard", originalinfo.getV_cert_no());// 身份证号
-																String params = ApiUtil.sortMap(infoMap);
-																logger.info("柜银云商户入驻提交信息：" + params);
-																String reStr = ApiUtil.sendPost("http://139.224.27.56/ygww/sys/api/outer/addMer.do",
-																		params);
-																logger.info("柜银云商户入驻返回结果：" + reStr);
-																Map reMap = ApiUtil.toMap(reStr);
-																String respCodes = reMap.get("respCode").toString();
-																logger.info("柜银云商户入驻状态码：" + respCodes);
-																String merKeys = "";
-																String merNo = "";
-																String checkFlag = "";
-																String expired = originalinfo.getV_expired();
-																char[] cc = expired.toCharArray();
-																StringBuffer bb = new StringBuffer();
-																bb.append(cc[2]);
-																bb.append(cc[3]);
-																bb.append(cc[0]);
-																bb.append(cc[1]);
-																logger.info("下游上传的信用卡有效期：" + bb);
-																if ("0000".equals(respCodes)) {
-																	merKeys = reMap.get("merKey").toString();
-																	logger.info("柜银云商户入驻返回商户密钥：" + merKeys);
-																	merNo = reMap.get("merNo").toString();
-																	logger.info("柜银云商户入驻返回商户号：" + merNo);
+													}
 
-																	Map<String, Object> infoMaps = new HashMap<String, Object>();
-																	infoMaps.put("agentNo", "10033");// 机构号
-																	infoMaps.put("merNo", merNo);// 商户号
-																	infoMaps.put("service", "ncldd0");// 通道
-																	infoMaps.put("lservice", "checkName");// 接口
-																	infoMaps.put("out_trade_no", ApiUtil.newDateMore());// 交易流水号
-																	infoMaps.put("payRate", originalinfo.getV_userFee());// 交易流水号
-																	infoMaps.put("settleFee", originalinfo.getV_settleUserFee());// 交易流水号
-																	params = ApiUtil.sortMap(infoMaps);
-																	sign = xdt.quickpay.gyy.util.MD5.getSign(infoMaps, merKeys);
-																	params += "&sign=" + sign;
-																	logger.info("柜银云开通快捷提交信息：" + params);
-																	reStr = ApiUtil.sendPost("http://139.224.27.56/ygww/sys/api/outer/geteway.do", params);
-																	logger.info("柜银云开通快捷返回结果：" + reStr);
-																	reMap = ApiUtil.toMap(reStr);
-																	respCodes = reMap.get("respCode").toString();
-																	logger.info("柜银云商户入驻状态码：" + respCodes);
-																	if ("0000".equals(respCodes)) {
-																		Map<String, Object> infoMapss = new HashMap<String, Object>();
-																		infoMapss.put("agentNo", "10033");// 机构号
-																		infoMapss.put("merNo", merNo);// 商户号
-																		infoMapss.put("service", "ncldd0");// 通道
-																		infoMapss.put("lservice", "applyTrade");// 接口
-																		infoMapss.put("accNo", originalinfo.getV_cardNo());// 交易卡
-																		infoMapss.put("out_trade_no", originalinfo.getV_oid());// 交易流水
-																		infoMapss.put("cvn2", originalinfo.getV_cvn2());// cvn2
+												}
+												break;
+											case "HJZF":// 汇聚快捷获取短信验证码
+												Map<String, String> result = new HashMap<>();
+												StringBuilder strs = new StringBuilder();
+												strs.append(HJUtil.Version2);
+												strs.append(pmsBusinessPos.getBusinessnum());// pmsBusinessPos.getBusinessnum()
+												strs.append(originalinfo.getV_productDesc());
+												strs.append(originalinfo.getV_oid());
+												strs.append(originalinfo.getV_txnAmt());
+												strs.append("1");
+												strs.append("FAST");
+												strs.append(originalinfo.getV_realName());
+												strs.append("1");
+												strs.append(originalinfo.getV_cert_no());
+												strs.append(originalinfo.getV_cardNo());
+												strs.append(originalinfo.getV_expired() == null ? ""
+														: originalinfo.getV_expired());// YYYY-MM
+												strs.append(originalinfo.getV_cvn2() == null ? ""
+														: originalinfo.getV_cvn2());
+												strs.append(originalinfo.getV_phone());
+												// strs.append(originalinfo.getV_attach() == null ? "" :
+												// originalinfo.getV_attach());
+												logger.info("汇聚待签名数据:" + strs.toString());
+												// String hmac =MD5Utils.sign(str.toString(), HJUtil.privateKey,
+												// "UTF-8");//RSAUtils.sign(str.toString().getBytes("UTF-8"),
+												// HJUtil.privateKey);
+												String hmac = DigestUtils
+														.md5Hex(strs.toString() + pmsBusinessPos.getKek());// pmsBusinessPos.getKek()
+												result.put("p0_Version", HJUtil.Version2);
+												result.put("p1_MerchantNo", pmsBusinessPos.getBusinessnum());
+												result.put("p2_MerchantName",
+														URLEncoder.encode(originalinfo.getV_productDesc(), "utf-8"));
+												result.put("q1_OrderNo", originalinfo.getV_oid());
+												result.put("q2_Amount", originalinfo.getV_txnAmt());
+												result.put("q3_Cur", "1");
+												result.put("q8_FrpCode", "FAST");
+												result.put("s1_PayerName",
+														URLEncoder.encode(originalinfo.getV_realName(), "utf-8"));
+												result.put("s2_PayerCardType", "1");
+												result.put("s3_PayerCardNo", originalinfo.getV_cert_no());
+												result.put("s4_PayerBankCardNo", originalinfo.getV_cardNo());
+												if (originalinfo.getV_expired() != null
+														&& originalinfo.getV_expired() != "") {
+													result.put("s5_BankCardExpire", originalinfo.getV_expired());
+												}
+												if (originalinfo.getV_cvn2() != null
+														&& originalinfo.getV_cvn2() != "") {
+													result.put("s6_CVV2", originalinfo.getV_cvn2());
+												}
+												result.put("s7_BankMobile", originalinfo.getV_phone());
+												// if (originalinfo.getV_attach() != null && originalinfo.getV_attach()
+												// != "") {
+												// result.put("t1_ext", originalinfo.getV_attach());
+												// }
+												result.put("hmac", URLEncoder.encode(hmac, "utf-8"));
+												TreeMap<String, String> paramsMap = new TreeMap<>();
+												paramsMap.putAll(result);
+												String paramSrc = RequestUtils.getParamSrc(paramsMap);
+												logger.info("汇聚快捷支付给上游发送的数据:" + paramSrc);
+												// String retuString = RequestUtils.sendPost(HJUtil.scanCodePay,
+												// "hmac=ab00408505d7fa77077a760a3bb0cb47&p0_Version=2.0&p1_MerchantNo=888101700005315&p2_MerchantName=测试商品&q1_OrderNo=QP20180411143509323540&q2_Amount=1&q3_Cur=1&q8_FrpCode=FAST&s1_PayerName=李娟&s2_PayerCardType=1&s3_PayerCardNo=120105197510055420&s4_PayerBankCardNo=6228450028016697770&s7_BankMobile=13323358548"
+												// );
+												String retuString = PostUtils.doPost(HJUtil.quickPay, paramsMap);
+												// HttpService HT = new HttpService();
+												// String retuString = HT.POSTReturnString(HJUtil.quickPay, result,
+												// MBUtil.codeG);
+												logger.info("汇聚返回字符串参数：" + retuString);
+												net.sf.json.JSONObject jsons = net.sf.json.JSONObject
+														.fromObject(retuString);
+												if ("100".equals(jsons.get("ra_Status"))) {
+													retMap.put("v_code", "00");
+													retMap.put("v_msg", jsons.getString("rb_Msg"));
+													retMap.put("v_oid", originalinfo.getV_oid());
+													retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
 
-																		infoMapss.put("useTime", bb);// 有效期
-																		infoMapss.put("orderTime", originalinfo.getV_time());// 接口
-																		infoMapss.put("amount", originalinfo.getV_txnAmt());// 交易金额，元
+												} else {
+													retMap.put("v_code", "01");
+													retMap.put("v_msg", jsons.getString("rb_Msg"));
+												}
+												break;
+											case "JBB":// 聚佰宝快捷
+												weixin = new PmsWeixinMerchartInfo();
 
-																		params = ApiUtil.sortMap(infoMapss);
-																		sign = xdt.quickpay.gyy.util.MD5.getSign(infoMapss, merKeys);
-																		params += "&sign=" + sign;
-																		logger.info("柜银云开通快捷提交信息：" + params);
-																		reStr = ApiUtil.sendPost("http://139.224.27.56/ygww/sys/api/outer/geteway.do",
-																				params);
-																		logger.info("柜银云开通快捷返回结果：" + reStr);
-																		reMap = ApiUtil.toMap(reStr);
-																		respCodes = reMap.get("respCode").toString();
-																		logger.info("柜银云开通快捷状态码：" + respCodes);
-																		if ("0000".equals(respCodes)) {
-																			checkFlag = reMap.get("checkFlag").toString();
-																			Map<String, Object> infoMapsss = new HashMap<String, Object>();
-																			infoMapsss.put("agentNo", "10033");// 机构号
-																			infoMapsss.put("merNo", merNo);// 商户号
-																			infoMapsss.put("service", "ncldd0");// 通道
-																			infoMapsss.put("lservice", "sendSMS");// 接口
-																			infoMapsss.put("cvn2", originalinfo.getV_cvn2());// cvn2
-																			infoMapsss.put("phone", originalinfo.getV_phone());// cvn2
-																			infoMapsss.put("useTime", bb);// 有效期
-																			infoMapsss.put("out_trade_no", originalinfo.getV_oid());// 交易流水
-																			infoMapsss.put("orderTime", originalinfo.getV_time());// 交易时间
-																			infoMapsss.put("checkFlag", checkFlag);// 交易标记
+												weixin.setCardNo(originalinfo.getV_settleCardNo());
+												weixin.setRealName(originalinfo.getV_settleName());
+												weixin.setCertNo(originalinfo.getV_cert_no());
+												weixin.setMobile(originalinfo.getV_phone());
 
-																			params = ApiUtil.sortMap(infoMapsss);
-																			sign = xdt.quickpay.gyy.util.MD5.getSign(infoMapsss, merKeys);
-																			params += "&sign=" + sign;
-																			System.out.println("柜银云获取短信提交信息：" + params);
-																			reStr = ApiUtil.sendPost("http://139.224.27.56/ygww/sys/api/outer/geteway.do",
-																					params);
-																			System.out.println("柜银云获取短信返回结果：" + reStr);
-																			reMap = ApiUtil.toMap(reStr);
-																			respCodes = reMap.get("respCode").toString();
-																			logger.info("柜银云开通快捷状态码：" + respCodes);
-																			if ("0000".equals(respCodes)) {
-																				OriginalOrderInfo info = new OriginalOrderInfo();
-																				info.setOrderId(originalinfo.getV_oid());
-																				info.setByUser(merNo);// 商户号
-																				info.setSumCode(merKeys);
-																				info.setBankId(checkFlag);
-																				number = originalDao.update(info);
-																				if (number > 0) {
-																					retMap.put("v_mid", originalinfo.getV_mid());
-																					retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																					retMap.put("v_time", originalinfo.getV_time());
-																					retMap.put("v_code", "00");
-																					retMap.put("v_msg", "请求成功");
-																					retMap.put("v_oid", originalinfo.getV_oid());
-																				} else {
-																					retMap.put("v_code", "15");
-																					retMap.put("v_msg", "请求失败");
-																				}
-																			} else {
-																				retMap.put("v_code", "15");
-																				retMap.put("v_msg", "请求失败");
-																			}
-																		} else {
-																			retMap.put("v_code", "15");
-																			retMap.put("v_msg", "请求失败");
-																		}
+												model = weixinService.selectByCardEntity(weixin);
 
-																	} else {
-																		retMap.put("v_code", "15");
-																		retMap.put("v_msg", "请求失败");
-																	}
+												logger.info("聚佰宝快捷原订单数据:" + JSON.toJSON(model));
 
+												if (model.getAccount() == null) {
+													// 商户编号
+													String merchantId = "888201711290115";
+													// 业务代码
+													String bussId = "ONL0003";
+													String key = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC35dOgycZisH24maQMHKVF4B/UNcyJULOJKCS6PUPhiLZAdPgR6ulwoWTtmN8v58PX4TDculU88aFz9CSlpfA72r0bHhhzDJdBP2Ki2Rc/RHwu6vrF9tbv0EPL7db/ECZe7CPZykLn/5JRlVpbsQWsx7gqQaiOY2nw4U6Lo13UoQIDAQAB";
+													RSAPublicKey publicKey = RSAEncrypt.loadPublicKeyByStr(key);
+													String certNo = originalinfo.getV_cert_no();
+													byte[] cipherData = RSAEncrypt.encrypt(publicKey,
+															certNo.getBytes("UTF-8"));
+													// rsa 加密之后的卡号
+													String rsacertNo = xdt.quickpay.jbb.util.Base64.encode(cipherData);
+
+													// 订单信息
+													String merOrderNum = originalinfo.getV_oid();
+
+													// 前台回调
+													String frontUrl = BaseUtil.url
+															+ "/quickPayAction/jbbNotifyUrl.action";
+													// 签名数据
+													String txnString = "bussId=" + bussId + "&certNo=" + rsacertNo
+															+ "&frontUrl=" + frontUrl + "&merchantId=" + merchantId
+															+ "&merOrderNum=" + merOrderNum + "&";
+													logger.info("聚佰宝上送的数据加密字符串:" + txnString);
+													MD5 md = new MD5();
+													String signValue = md.getMD5ofStr(txnString + "675FC1ctf2Y6zVm3");
+
+													String txn = "bussId=" + bussId + "&certNo="
+															+ URLEncoder.encode(rsacertNo, "utf-8") + "&frontUrl="
+															+ frontUrl + "&merchantId=" + merchantId + "&merOrderNum="
+															+ merOrderNum + "&signValue=" + signValue;
+
+													logger.info("聚佰宝上送的数据:" + txn);
+
+													url = "https://cashier.etonepay.com/NetPay/quickPaySign.action?"
+															+ txn;
+
+													HttpURLConection http = new HttpURLConection();
+
+													HttpUtil h = new HttpUtil();
+
+													String resonpe = http.httpURLConnectionPOST(
+															"https://cashier.etonepay.com/NetPay/quickPaySign.action",
+															txn);
+													logger.info("响应结果:" + resonpe);
+													net.sf.json.JSONObject ob = net.sf.json.JSONObject
+															.fromObject(resonpe);
+													Iterator it = ob.keys();
+													String respCode = "";
+													String html = "";
+													while (it.hasNext()) {
+														key = (String) it.next();
+														if (key.equals("respCode")) {
+
+															respCode = ob.getString(key);
+
+															logger.info("聚佰宝签约响应状态码:" + respCode);
+
+														}
+														if (key.equals("html")) {
+
+															html = ob.getString(key);
+
+															logger.info("聚佰宝签约html:" + html);
+														}
+													}
+													if ("0000".equals(respCode)) {
+														retMap.put("v_code", "00000");
+														retMap.put("v_msg", "请求成功");
+														retMap.put("html", html);
+													}
+
+												} else {
+
+													logger.info("##################聚佰宝获取短信接口##########");
+													// 商户编号
+													String merchantId = "888201711290115";
+													// 业务代码
+													String bussId = "ONL0003";
+													Integer amount = (int) (Double
+															.parseDouble(originalinfo.getV_txnAmt()) * 100);
+
+													String tranAmt = amount.toString();
+
+													String protocolNo = "";
+
+													// 订单信息
+													String merOrderNum = originalinfo.getV_oid();
+													// 签名数据
+													String txnString = "bussId=" + bussId + "&merchantId=" + merchantId
+															+ "&merOrderNum=" + merOrderNum + "&protocolNo="
+															+ protocolNo + "&tranAmt=" + tranAmt + "&";
+													logger.info("聚佰宝上送的数据加密字符串:" + txnString);
+													MD5 md = new MD5();
+													String signValue = md.getMD5ofStr(txnString + "675FC1ctf2Y6zVm3");
+
+													String txn = "bussId=" + bussId + "&merchantId=" + merchantId
+															+ "&merOrderNum=" + merOrderNum + "&protocolNo="
+															+ protocolNo + "&tranAmt=" + tranAmt.toString()
+															+ "&signValue=" + signValue;
+
+													logger.info("聚佰宝上送的数据:" + txn);
+
+													url = "https://cashier.etonepay.com/NetPay/quickPaySms.action?"
+															+ txn;
+
+													HttpURLConection http = new HttpURLConection();
+
+													HttpUtil h = new HttpUtil();
+
+													String resonpe = http.httpURLConnectionPOST(
+															"https://cashier.etonepay.com/NetPay/quickPaySms.action",
+															txn);
+													logger.info("响应结果:" + resonpe);
+													net.sf.json.JSONObject ob = net.sf.json.JSONObject
+															.fromObject(resonpe);
+													Iterator it = ob.keys();
+													String transId = "";
+
+													String respCode = "";
+													while (it.hasNext()) {
+														String key = (String) it.next();
+														if (key.equals("respCode")) {
+
+															respCode = ob.getString(key);
+
+															logger.info("聚佰宝签约响应状态码:" + respCode);
+
+														}
+														if (key.equals("merOrderNum")) {
+
+															merOrderNum = ob.getString(key);
+
+															logger.info("聚佰宝签约html:" + merOrderNum);
+														}
+														if (key.equals("transId")) {
+
+															transId = ob.getString(key);
+
+															logger.info("聚佰宝签约transId:" + transId);
+														}
+													}
+													if ("0000".equals(respCode)) {
+														OriginalOrderInfo info = new OriginalOrderInfo();
+														info.setOrderId(merOrderNum);
+														info.setByUser(transId);// 商户号
+														info.setBankId(protocolNo);
+														number = originalDao.update(info);
+														if (number > 0) {
+															retMap.put("v_oid", originalinfo.getV_oid());
+															retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+															retMap.put("v_code", "00");
+															retMap.put("v_msg", "请求成功");
+															retMap.put("v_time", originalinfo.getV_time());
+															retMap.put("v_mid", originalinfo.getV_mid());
+														}
+													}
+
+												}
+
+												break;
+											case "YFWG":// 裕福快捷
+												DecimalFormat df1 = new DecimalFormat("######0"); // 四色五入转换成整数
+												if (originalinfo.getV_userId() == null
+														|| "".equals(originalinfo.getV_userId())) {
+													retMap.put("v_code", "01");
+													retMap.put("v_msg", "v_userId is null");
+													return retMap;
+												}
+												final String merCertPath = new File(
+														this.getClass().getResource("/").getPath()).getParentFile()
+																.getParentFile().getCanonicalPath()
+														+ "//ky//" + pmsBusinessPos.getBusinessnum() + ".cer";
+												final String pfxPath = new File(
+														this.getClass().getResource("/").getPath()).getParentFile()
+																.getParentFile().getCanonicalPath()
+														+ "//ky//" + pmsBusinessPos.getBusinessnum() + ".pfx";
+												final String pfxPwd = pmsBusinessPos.getKek();
+												QuickReq req = new QuickReq();
+												YufuCipher cipher = null;
+												YufuCipherSupport instance = null;
+												cipher = YufuCipherSupport.getCipherInstance(merCertPath, pfxPath,
+														pfxPwd, cipher, instance);
+												// YufuCipher cipher = YufuCipherSupport.getCipherInstance(merCertPath,
+												// pfxPath,
+												// pfxPwd);
+												try {
+													List<Map<String, String>> list = new ArrayList<>();
+													Map<String, String> reqMaps = new HashMap<>();
+													req.setVersion("1.0.0");
+													req.setMerchantId(pmsBusinessPos.getBusinessnum());
+													req.setMerchantOrderId(originalinfo.getV_oid());
+													req.setMerchantOrderTime(originalinfo.getV_time());
+													BigDecimal payAmt = new BigDecimal(originalinfo.getV_txnAmt())
+															.setScale(2, BigDecimal.ROUND_HALF_UP)
+															.multiply(new BigDecimal(100));
+													req.setMerchantOrderAmt(df1.format(payAmt));
+													// req.setMerchantDisctAmt(merchantDisctAmt);
+													req.setMerchantOrderCurrency("156");
+													req.setGwType("04");
+													req.setBackUrl(YFUtil.notifyUrl);
+													// req.setUserType("01");
+													req.setMerchantUserId(originalinfo.getV_userId());
+
+													// {cardInfoList=, respDesc=调用接口成功, merchantId=000001220100000470,
+													// merchantUserId=1523167250194, version=1.0.0, respCode=0000}
+													req.setMerchantSettleInfo("[{\"merchantId\":\""
+															+ pmsBusinessPos.getBusinessnum() + "\",\"merchantName\":\""
+															+ originalinfo.getV_productDesc() + "\",\"orderAmt\":\""
+															+ df1.format(payAmt) + "\"," + "\"sumGoodsName \":\""
+															+ originalinfo.getV_productDesc() + "\"}]");
+
+													req.setMerchantOrderDesc(originalinfo.getV_productDesc());
+
+													// req.setMerchantSettleInfo("[{\"merchantId\":\"000001110100000812\",\"merchantName\":\"商户00000111050000001\",\"orderAmt\":100,\"sumGoodsName\":\"我是00000111050000001的商品，哈哈哈\"}]");
+													req.setMsgExt(originalinfo.getV_attach());
+													// req.setMisc("");
+
+													if ("".equals(originalinfo.getV_verifyId())
+															|| originalinfo.getV_verifyId() == null) {
+														if ("".equals(originalinfo.getV_cardNo())
+																|| originalinfo.getV_cardNo() == null) {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "v_cardNo is null");
+															return retMap;
+														} else {
+															reqMaps.put("cardNo", originalinfo.getV_cardNo());// originalinfo.getV_cardNo()
+														}
+														if ("1".equals(originalinfo.getV_accountType())) {
+															reqMaps.put("cardType", "P1");
+														} else if ("2".equals(originalinfo.getV_accountType())) {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "此商户不支持贷记卡");
+															return retMap;
+															// reqMaps.put("cardType", "P2");
+														} else {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "v_accountType is null");
+															return retMap;
+														}
+														if (!"".equals(originalinfo.getV_realName())
+																&& originalinfo.getV_realName() != null) {
+															reqMaps.put("name", originalinfo.getV_realName());
+														} else {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "v_realName is null");
+															return retMap;
+														}
+														if (bank2 != null) {
+															reqMaps.put("bankNo", bank2.getBank_code());
+														} else {
+															reqMaps.put("bankNo", "");
+														}
+														if (!"".equals(originalinfo.getV_cert_no())
+																&& originalinfo.getV_cert_no() != null) {
+															reqMaps.put("certNo", originalinfo.getV_cert_no());
+														} else {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", "v_cert_no is null");
+															return retMap;
+														}
+														reqMaps.put("certType", "01");
+														reqMaps.put("phone", originalinfo.getV_phone());
+														reqMaps.put("cvn2", originalinfo.getV_cvn2() == null ? ""
+																: originalinfo.getV_cvn2());
+														reqMaps.put("expired", originalinfo.getV_expired() == null ? ""
+																: originalinfo.getV_expired());
+														req.setPayCardList("[{\"cardNo\":\"" + reqMaps.get("cardNo")
+																+ "\",\"cardType\":\"" + reqMaps.get("cardType")
+																+ "\",\"bankNo\":\"" + reqMaps.get("bankNo")
+																+ "\",\"certNo\":\"" + reqMaps.get("certNo")
+																+ "\",\"certType\":\"01\",\"name\":\""
+																+ reqMaps.get("name") + "\",\"phone\":\""
+																+ reqMaps.get("phone") + "\",\"cvn2\":\""
+																+ reqMaps.get("cvn2") + "\",\"expired\":\""
+																+ reqMaps.get("expired") + "\"}]");
+													} else {
+														req.setVerifyId(originalinfo.getV_verifyId());
+													}
+
+													// req.setPayCardList("[{\"cardNo\":\""+originalinfo.getV_cardNo()+"\",\"cardType\":\"P1\",\"bankNo\":\"CDB\",\"certNo\":\""+originalinfo.getV_cert_no()+"\","
+													// +
+													// "\"certType\":\"01\",\"name\":\""+originalinfo.getV_realName()+"\",\"phone\":\""+originalinfo.getV_phone()+"\",\"cvn2\":\""+originalinfo.getV_cvn2()==null?"":originalinfo.getV_cvn2()+"\",\"expired\":\""+originalinfo.getV_expired()==null?"":originalinfo.getV_expired()+"\"}]");
+													//
+													// req.setPayCardList(JSONObject.toJSONString(list));
+
+													String data = GsonUtil.objToJson(req);
+													logger.info("data:" + data);
+													Map<String, String> params = GsonUtil.jsonToObj(data, Map.class);
+													ParamPacket bo = cipher.doPack(params);
+													logger.info("11!:" + JSON.toJSON(bo));
+													TreeMap<String, String> map_param = new TreeMap<>();
+													map_param.put("merchantId", pmsBusinessPos.getBusinessnum());
+													map_param.put("data", URLEncoder.encode(bo.getData(), "utf-8"));
+													map_param.put("enc", URLEncoder.encode(bo.getEnc(), "utf-8"));
+													map_param.put("sign", URLEncoder.encode(bo.getSign(), "utf-8"));
+													String urlPay = "";
+													if ("000001110100000812".equals(pmsBusinessPos.getBusinessnum())) {
+														urlPay = "http://malltest.yfpayment.com/payment/service/payset.do";
+													} else {
+														urlPay = "http://www.yfpayment.com/payment/service/payset.do";
+													}
+													String returnStr = PostUtils.doPost(urlPay, map_param);
+
+													if (returnStr != null && !"".equals(returnStr)) {
+														// 二、验签解密
+														returnStr = URLDecoder.decode(returnStr, "utf-8");
+														System.out.println("URL解码后的置单应答结果：" + returnStr);
+														TreeMap<String, String> boMap = JSON.parseObject(returnStr,
+																new TypeReference<TreeMap<String, String>>() {
+																});
+														Map<String, String> payshowParams = cipher
+																.unPack(new ParamPacket(boMap.get("data"),
+																		boMap.get("enc"), boMap.get("sign")));
+														System.out.println("解密后的置单应答结果：" + payshowParams);
+														if ("0000".equals(payshowParams.get("respCode"))) {
+															OriginalOrderInfo oo = new OriginalOrderInfo();
+															oo.setOrderId(originalinfo.getV_oid());
+															oo.setSumCode(payshowParams.get("token"));
+															oo.setProcdutNum("0000");
+															num = originalDao.update(oo);
+															if (num > 0) {
+																retMap.put("v_code", "00");
+																retMap.put("v_msg", payshowParams.get("respDesc"));
+																retMap.put("v_attach", payshowParams.get("msgExt"));
+																retMap.put("v_oid", originalinfo.getV_oid());
+																retMap.put("v_mid", originalinfo.getV_mid());
+															} else {
+																logger.info("app_id修改失败!");
+																retMap.put("v_code", "01");
+																retMap.put("v_msg", "系统错误,预下单失败");
+															}
+														} else {
+															retMap.put("v_code", "01");
+															retMap.put("v_msg", payshowParams.get("respDesc"));
+														}
+
+													} else {
+														System.out.println("置单返回报文为空！");
+													}
+												} catch (Exception e) {
+													e.printStackTrace();
+												}
+												break;
+											case "GYY":// 柜银云快捷
+												Map<String, Object> infoMap = new HashMap<String, Object>();
+												infoMap.put("agentNo", "10033");// 机构号
+												infoMap.put("merName", originalinfo.getV_productDesc());// 商户名称
+												infoMap.put("merAddr", originalinfo.getV_attach());// 商户地址
+												infoMap.put("settleName", originalinfo.getV_realName());// 结算姓名
+												infoMap.put("settlePhone", originalinfo.getV_phone());// 手机号
+												infoMap.put("settleBank", bank.getBank_short_title());// 开户银行
+												infoMap.put("settleBankNo", bank.getBank_code());// 银行简码
+												infoMap.put("settleAccount", originalinfo.getV_settleCardNo());// 结算卡号
+												infoMap.put("settleBankSub", bank.getBank_name());// 开户支行
+												infoMap.put("settleBankBranch", originalinfo.getV_settlePmsBankNo());// 联行号
+												infoMap.put("settleSubProvince", bank.getBank_province());// 开户省
+												infoMap.put("settleSubCity", bank.getBank_city());// 开户市
+
+												infoMap.put("settleIdCard", originalinfo.getV_cert_no());// 身份证号
+												String params = ApiUtil.sortMap(infoMap);
+												logger.info("柜银云商户入驻提交信息：" + params);
+												String reStr = ApiUtil.sendPost(
+														"http://139.224.27.56/ygww/sys/api/outer/addMer.do", params);
+												logger.info("柜银云商户入驻返回结果：" + reStr);
+												Map reMap = ApiUtil.toMap(reStr);
+												String respCodes = reMap.get("respCode").toString();
+												logger.info("柜银云商户入驻状态码：" + respCodes);
+												String merKeys = "";
+												String merNo = "";
+												String checkFlag = "";
+												String expired = originalinfo.getV_expired();
+												char[] cc = expired.toCharArray();
+												StringBuffer bb = new StringBuffer();
+												bb.append(cc[2]);
+												bb.append(cc[3]);
+												bb.append(cc[0]);
+												bb.append(cc[1]);
+												logger.info("下游上传的信用卡有效期：" + bb);
+												if ("0000".equals(respCodes)) {
+													merKeys = reMap.get("merKey").toString();
+													logger.info("柜银云商户入驻返回商户密钥：" + merKeys);
+													merNo = reMap.get("merNo").toString();
+													logger.info("柜银云商户入驻返回商户号：" + merNo);
+
+													Map<String, Object> infoMaps = new HashMap<String, Object>();
+													infoMaps.put("agentNo", "10033");// 机构号
+													infoMaps.put("merNo", merNo);// 商户号
+													infoMaps.put("service", "ncldd0");// 通道
+													infoMaps.put("lservice", "checkName");// 接口
+													infoMaps.put("out_trade_no", ApiUtil.newDateMore());// 交易流水号
+													infoMaps.put("payRate", originalinfo.getV_userFee());// 交易流水号
+													infoMaps.put("settleFee", originalinfo.getV_settleUserFee());// 交易流水号
+													params = ApiUtil.sortMap(infoMaps);
+													sign = xdt.quickpay.gyy.util.MD5.getSign(infoMaps, merKeys);
+													params += "&sign=" + sign;
+													logger.info("柜银云开通快捷提交信息：" + params);
+													reStr = ApiUtil.sendPost(
+															"http://139.224.27.56/ygww/sys/api/outer/geteway.do",
+															params);
+													logger.info("柜银云开通快捷返回结果：" + reStr);
+													reMap = ApiUtil.toMap(reStr);
+													respCodes = reMap.get("respCode").toString();
+													logger.info("柜银云商户入驻状态码：" + respCodes);
+													if ("0000".equals(respCodes)) {
+														Map<String, Object> infoMapss = new HashMap<String, Object>();
+														infoMapss.put("agentNo", "10033");// 机构号
+														infoMapss.put("merNo", merNo);// 商户号
+														infoMapss.put("service", "ncldd0");// 通道
+														infoMapss.put("lservice", "applyTrade");// 接口
+														infoMapss.put("accNo", originalinfo.getV_cardNo());// 交易卡
+														infoMapss.put("out_trade_no", originalinfo.getV_oid());// 交易流水
+														infoMapss.put("cvn2", originalinfo.getV_cvn2());// cvn2
+
+														infoMapss.put("useTime", bb);// 有效期
+														infoMapss.put("orderTime", originalinfo.getV_time());// 接口
+														infoMapss.put("amount", originalinfo.getV_txnAmt());// 交易金额，元
+
+														params = ApiUtil.sortMap(infoMapss);
+														sign = xdt.quickpay.gyy.util.MD5.getSign(infoMapss, merKeys);
+														params += "&sign=" + sign;
+														logger.info("柜银云开通快捷提交信息：" + params);
+														reStr = ApiUtil.sendPost(
+																"http://139.224.27.56/ygww/sys/api/outer/geteway.do",
+																params);
+														logger.info("柜银云开通快捷返回结果：" + reStr);
+														reMap = ApiUtil.toMap(reStr);
+														respCodes = reMap.get("respCode").toString();
+														logger.info("柜银云开通快捷状态码：" + respCodes);
+														if ("0000".equals(respCodes)) {
+															checkFlag = reMap.get("checkFlag").toString();
+															Map<String, Object> infoMapsss = new HashMap<String, Object>();
+															infoMapsss.put("agentNo", "10033");// 机构号
+															infoMapsss.put("merNo", merNo);// 商户号
+															infoMapsss.put("service", "ncldd0");// 通道
+															infoMapsss.put("lservice", "sendSMS");// 接口
+															infoMapsss.put("cvn2", originalinfo.getV_cvn2());// cvn2
+															infoMapsss.put("phone", originalinfo.getV_phone());// cvn2
+															infoMapsss.put("useTime", bb);// 有效期
+															infoMapsss.put("out_trade_no", originalinfo.getV_oid());// 交易流水
+															infoMapsss.put("orderTime", originalinfo.getV_time());// 交易时间
+															infoMapsss.put("checkFlag", checkFlag);// 交易标记
+
+															params = ApiUtil.sortMap(infoMapsss);
+															sign = xdt.quickpay.gyy.util.MD5.getSign(infoMapsss,
+																	merKeys);
+															params += "&sign=" + sign;
+															System.out.println("柜银云获取短信提交信息：" + params);
+															reStr = ApiUtil.sendPost(
+																	"http://139.224.27.56/ygww/sys/api/outer/geteway.do",
+																	params);
+															System.out.println("柜银云获取短信返回结果：" + reStr);
+															reMap = ApiUtil.toMap(reStr);
+															respCodes = reMap.get("respCode").toString();
+															logger.info("柜银云开通快捷状态码：" + respCodes);
+															if ("0000".equals(respCodes)) {
+																OriginalOrderInfo info = new OriginalOrderInfo();
+																info.setOrderId(originalinfo.getV_oid());
+																info.setByUser(merNo);// 商户号
+																info.setSumCode(merKeys);
+																info.setBankId(checkFlag);
+																number = originalDao.update(info);
+																if (number > 0) {
+																	retMap.put("v_mid", originalinfo.getV_mid());
+																	retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
+																	retMap.put("v_time", originalinfo.getV_time());
+																	retMap.put("v_code", "00");
+																	retMap.put("v_msg", "请求成功");
+																	retMap.put("v_oid", originalinfo.getV_oid());
 																} else {
 																	retMap.put("v_code", "15");
 																	retMap.put("v_msg", "请求失败");
 																}
-
-																break;
-															case "SHYL":// 上海漪雷快捷
-																logger.info("###########上海漪雷快捷绑卡接口##########");
-																Map<String, Object> infos = new HashMap<String, Object>();
-																infos.put("tranType", "14000");// 机构号
-																infos.put("merName", originalinfo.getV_productDesc());// 商户名称
-																infos.put("merAddress", originalinfo.getV_productDesc());// 商户地址
-
-																// 对特殊字段进行公钥加密
-																PublicKey publicKey = RSAUtil.getPublicKey(PUBLIC_KEY);
-																Cipher ciphers = Cipher.getInstance("RSA");
-																ciphers.init(Cipher.ENCRYPT_MODE, publicKey);
-																// 姓名加密
-																String name = ciphers.doFinal(originalinfo.getV_realName().getBytes()).toString();
-																// 身份证加密
-																String idcard = ciphers.doFinal(originalinfo.getV_cert_no().getBytes()).toString();
-																// 借记卡加密
-																String bankCard = ciphers.doFinal(originalinfo.getV_settleCardNo().getBytes()).toString();
-																infos.put("name", name);// 结算姓名
-																infos.put("idcard", idcard);// 手机号
-																infos.put("bankCard", bankCard);// 开户银行
-																infos.put("bankName", bank.getBank_short_title());// 银行简码
-																infos.put("bankNo", "GSYH");// 结算卡号
-																// 手机号加密
-																String preMobile = ciphers.doFinal(originalinfo.getV_phone().getBytes()).toString();
-																infos.put("preMobile", preMobile);// 开户支行
-																infos.put("bankCode", originalinfo.getV_settlePmsBankNo());// 联行号
-																infos.put("branchBank", bank.getBank_name());// 开户省
-																infos.put("province", bank.getBank_province());// 开户市
-																infos.put("city", bank.getBank_city());// 身份证号
-																infos.put("tradeRate", Double.parseDouble(originalinfo.getV_userFee()) * 100 + "");// 身份证号
-																infos.put("drawFee", originalinfo.getV_settleUserFee());// 身份证号
-																infos.put("custNo", originalinfo.getV_userId());// 身份证号
-																String stris = RSAUtil.getSign(infos);
-																logger.info("上海漪雷快捷绑卡签名前的数据:" + stris);
-																// RSA私钥签名
-																String signature = RSAUtil.sign(stris.getBytes("UTF-8"), PRIVACE_KEY);
-
-																Map<String, String> mapstr = new HashMap<String, String>();
-
-																mapstr.put("version", "1.0.0");
-																mapstr.put("platformNos", "P20171012861761863371");
-																mapstr.put("channelNo", "C20180424609343188755");
-																mapstr.put("merNo", "M20180424611894665448");
-																mapstr.put("signature", signature);
-																logger.info("上海漪雷快捷绑卡上送的数据:" + HttpURLConection.parseParams(mapstr));
-																String resultcode = HttpURLConection.httpURLConnectionPOST(
-																		"http://spapi.beichuanglangrun.com/trade/handle",
-																		HttpURLConection.parseParams(mapstr));
-
-																logger.info("上海漪雷快捷绑卡响应的数据:" + resultcode);
-																logger.info("###########上海漪雷快捷获取短信验证码##########");
-																Map<String, Object> infoMaps = new HashMap<String, Object>();
-																infoMaps.put("tranType", "14000");// 机构号
-																infoMaps.put("orderAmount", originalinfo.getV_productDesc());// 商户名称
-																infoMaps.put("subject", originalinfo.getV_attach());// 商户地址
-																infoMaps.put("merOrderNo", "M20180413085019363857");// 结算姓名
-																infoMaps.put("orderNo", originalinfo.getV_phone());// 手机号
-																infoMaps.put("tradeRate", bank.getBank_short_title());// 开户银行
-																infoMaps.put("drawFee", bank.getBank_code());// 银行简码
-																infoMaps.put("payBankCard", originalinfo.getV_settleCardNo());// 结算卡号
-																infoMaps.put("payBankName", bank.getBank_name());// 开户支行
-																infoMaps.put("payPreMobile", originalinfo.getV_settlePmsBankNo());// 联行号
-																infoMaps.put("cvn2", bank.getBank_province());// 开户省
-																infoMaps.put("expired", bank.getBank_city());// 开户市
-																infoMaps.put("payBankCode", originalinfo.getV_cert_no());// 身份证号
-																infoMaps.put("name", originalinfo.getV_cert_no());// 身份证号
-																infoMaps.put("idcard", originalinfo.getV_cert_no());// 身份证号
-																infoMaps.put("bankCard", originalinfo.getV_cert_no());// 身份证号
-																infoMaps.put("bankName", originalinfo.getV_cert_no());// 身份证号
-																infoMaps.put("bankCode", originalinfo.getV_cert_no());// 身份证号
-																infoMaps.put("preMobile", originalinfo.getV_cert_no());// 身份证号
-																infoMaps.put("backUrl", originalinfo.getV_cert_no());// 身份证号
-																break;
-															default:
-																break;
+															} else {
+																retMap.put("v_code", "15");
+																retMap.put("v_msg", "请求失败");
 															}
+														} else {
+															retMap.put("v_code", "15");
+															retMap.put("v_msg", "请求失败");
 														}
-													}
-													
-													
-												}else {
-													
-													logger.error("姓名已被列入黑名单，请联系业务经理!");
-													retMap.put("v_code", "123");
-													retMap.put("v_msg", "姓名已被列入黑名单，请联系业务经理!");
-													return retMap;
-												}
-												
-											}else {
-												
-												logger.error("证件号已被列入黑名单，请联系业务经理!");
-												retMap.put("v_code", "123");
-												retMap.put("v_msg", "证件号已被列入黑名单，请联系业务经理!");
-												return retMap;
-											}
-											
 
-										}else
-										{
-											logger.error("卡号已被列入黑名单，请联系业务经理!");
-											retMap.put("v_code", "123");
-											retMap.put("v_msg", "卡号已被列入黑名单，请联系业务经理!");
-											return retMap;
+													} else {
+														retMap.put("v_code", "15");
+														retMap.put("v_msg", "请求失败");
+													}
+
+												} else {
+													retMap.put("v_code", "15");
+													retMap.put("v_msg", "请求失败");
+												}
+
+												break;
+											case "SHYL":// 上海漪雷快捷
+												logger.info("###########上海漪雷快捷绑卡接口##########");
+												Map<String, Object> infos = new HashMap<String, Object>();
+												infos.put("tranType", "14000");// 机构号
+												infos.put("merName", originalinfo.getV_productDesc());// 商户名称
+												infos.put("merAddress", originalinfo.getV_productDesc());// 商户地址
+
+												// 对特殊字段进行公钥加密
+												PublicKey publicKey = RSAUtil.getPublicKey(PUBLIC_KEY);
+												Cipher ciphers = Cipher.getInstance("RSA");
+												ciphers.init(Cipher.ENCRYPT_MODE, publicKey);
+												// 姓名加密
+												String name = ciphers.doFinal(originalinfo.getV_realName().getBytes())
+														.toString();
+												// 身份证加密
+												String idcard = ciphers.doFinal(originalinfo.getV_cert_no().getBytes())
+														.toString();
+												// 借记卡加密
+												String bankCard = ciphers
+														.doFinal(originalinfo.getV_settleCardNo().getBytes())
+														.toString();
+												infos.put("name", name);// 结算姓名
+												infos.put("idcard", idcard);// 手机号
+												infos.put("bankCard", bankCard);// 开户银行
+												infos.put("bankName", bank.getBank_short_title());// 银行简码
+												infos.put("bankNo", "GSYH");// 结算卡号
+												// 手机号加密
+												String preMobile = ciphers.doFinal(originalinfo.getV_phone().getBytes())
+														.toString();
+												infos.put("preMobile", preMobile);// 开户支行
+												infos.put("bankCode", originalinfo.getV_settlePmsBankNo());// 联行号
+												infos.put("branchBank", bank.getBank_name());// 开户省
+												infos.put("province", bank.getBank_province());// 开户市
+												infos.put("city", bank.getBank_city());// 身份证号
+												infos.put("tradeRate",
+														Double.parseDouble(originalinfo.getV_userFee()) * 100 + "");// 身份证号
+												infos.put("drawFee", originalinfo.getV_settleUserFee());// 身份证号
+												infos.put("custNo", originalinfo.getV_userId());// 身份证号
+												String stris = RSAUtil.getSign(infos);
+												logger.info("上海漪雷快捷绑卡签名前的数据:" + stris);
+												// RSA私钥签名
+												String signature = RSAUtil.sign(stris.getBytes("UTF-8"), PRIVACE_KEY);
+
+												Map<String, String> mapstr = new HashMap<String, String>();
+
+												mapstr.put("version", "1.0.0");
+												mapstr.put("platformNos", "P20171012861761863371");
+												mapstr.put("channelNo", "C20180424609343188755");
+												mapstr.put("merNo", "M20180424611894665448");
+												mapstr.put("signature", signature);
+												logger.info("上海漪雷快捷绑卡上送的数据:" + HttpURLConection.parseParams(mapstr));
+												String resultcode = HttpURLConection.httpURLConnectionPOST(
+														"http://spapi.beichuanglangrun.com/trade/handle",
+														HttpURLConection.parseParams(mapstr));
+
+												logger.info("上海漪雷快捷绑卡响应的数据:" + resultcode);
+												logger.info("###########上海漪雷快捷获取短信验证码##########");
+												Map<String, Object> infoMaps = new HashMap<String, Object>();
+												infoMaps.put("tranType", "14000");// 机构号
+												infoMaps.put("orderAmount", originalinfo.getV_productDesc());// 商户名称
+												infoMaps.put("subject", originalinfo.getV_attach());// 商户地址
+												infoMaps.put("merOrderNo", "M20180413085019363857");// 结算姓名
+												infoMaps.put("orderNo", originalinfo.getV_phone());// 手机号
+												infoMaps.put("tradeRate", bank.getBank_short_title());// 开户银行
+												infoMaps.put("drawFee", bank.getBank_code());// 银行简码
+												infoMaps.put("payBankCard", originalinfo.getV_settleCardNo());// 结算卡号
+												infoMaps.put("payBankName", bank.getBank_name());// 开户支行
+												infoMaps.put("payPreMobile", originalinfo.getV_settlePmsBankNo());// 联行号
+												infoMaps.put("cvn2", bank.getBank_province());// 开户省
+												infoMaps.put("expired", bank.getBank_city());// 开户市
+												infoMaps.put("payBankCode", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("name", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("idcard", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("bankCard", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("bankName", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("bankCode", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("preMobile", originalinfo.getV_cert_no());// 身份证号
+												infoMaps.put("backUrl", originalinfo.getV_cert_no());// 身份证号
+												break;
+											default:
+												break;
+											}
 										}
-									}else {
-										logger.error("商户已被列入黑名单，请联系业务经理!");
-										retMap.put("v_code", "123");
-										retMap.put("v_msg", "商户已被列入黑名单，请联系业务经理!");
-										return retMap;
 									}
 
 								} else {
@@ -2800,2145 +5177,7 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 
 					}
 
-				} else {
-					
-					// 实际金额
-					String factAmount = "" + new BigDecimal(originalinfo.getV_txnAmt()).multiply(new BigDecimal(100));
-
-					if (pmsBusinessPos == null) {
-						retMap.put("v_code", "18");
-						retMap.put("v_msg", "未找到路由，请联系业务开通！");
-						return retMap;
-					}
-					// 判断入金是否开启
-					if ("1".equals(pmsBusinessPos.getOutPay())) {
-						retMap.put("v_code", "19");
-						retMap.put("v_msg", "入金未开通,请联系业务经理!");
-						return retMap;
-					}
-					// 校验欧单金额限制
-					ResultInfo payCheckResult = iPublicTradeVerifyService.amountVerifyOagent(
-							(int) Double.parseDouble(factAmount), TradeTypeEnum.merchantCollect, oAgentNo);
-					if (!payCheckResult.getErrCode().equals("0")) {
-						// 交易不支持
-						logger.info(
-								"欧单金额限制，oAagentNo:" + oAgentNo + ",payType:" + PaymentCodeEnum.moBaoQuickPay.getTypeCode());
-						return setResp("05", "欧单金额限制，请重试或联系客服");
-					}
-
-					// 校验欧单模块是否开启
-					ResultInfo resultInfoForOAgentNo = iPublicTradeVerifyService
-							.moduleVerifyOagent(TradeTypeEnum.merchantCollect, oAgentNo);
-					if (!resultInfoForOAgentNo.getErrCode().equals("0")) {
-						// 交易不支持
-						if (StringUtils.isEmpty(resultInfoForOAgentNo.getMsg())) {
-							logger.error("交易关闭，请重试或联系客服");
-							return setResp("06", "交易关闭，请重试或联系客服");
-						} else {
-							return setResp("07", "系统异常，请重试或联系客服");
-						}
-
-					}
-					// 校验商户模块是否开启
-					ResultInfo payCheckResult3 = iPublicTradeVerifyService.moduelVerifyMer(TradeTypeEnum.merchantCollect,
-							mercId);
-					if (!payCheckResult3.getErrCode().equals("0")) {
-						// 交易不支持
-						logger.info(
-								"商户模块限制，oAagentNo:" + oAgentNo + ",payType:" + PaymentCodeEnum.moBaoQuickPay.getTypeCode());
-						return setResp("08", "商户模块限制,请重试或联系客服");
-					}
-					// 校验商户金额限制
-					Map<String, String> paramMap = new HashMap<String, String>();
-					paramMap.put("mercid", merchantinfo.getMercId());// 商户编号
-					paramMap.put("businesscode", TradeTypeEnum.merchantCollect.getTypeCode());// 业务编号
-					paramMap.put("oAgentNo", oAgentNo);
-					// 商户 网购 业务信息
-					Map<String, String> resultMap = merchantMineDao.queryBusinessInfo(paramMap);
-
-					if (resultMap == null || resultMap.size() == 0) {
-						// 若查到的是空值，直接返回错误
-						logger.info("没有查到相关费率配置：" + merchantinfo.getMobilephone());
-						return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
-					}
-
-					String maxTransMoney = resultMap.get("MAX_AMOUNT"); // 每笔最大交易金额
-					String minTransMoney = resultMap.get("MIN_AMOUNT"); // 每笔最小交易金额
-					String paymentAmount = factAmount;// 交易金额
-
-					if (new BigDecimal(paymentAmount).compareTo(new BigDecimal(maxTransMoney)) == 1) {
-						// 金额超过最大金额
-						logger.info("交易金额大于最打金额");
-						return setResp("10", "金额超过最大交易金额");
-					} else if (new BigDecimal(paymentAmount).compareTo(new BigDecimal(minTransMoney)) == -1) {
-						// 金额小于最小金额
-						logger.info("交易金额小于最小金额");
-						return setResp("11", "交易金额小于最小金额");
-
-					}
-
-					// 组装订单数据
-					PmsAppTransInfo pmsAppTransInfo = new PmsAppTransInfo();
-					// 写入欧单编号
-					pmsAppTransInfo.setoAgentNo(oAgentNo);
-					pmsAppTransInfo.setStatus(OrderStatusEnum.initlize.getStatus());// 订单初始化状态
-					pmsAppTransInfo.setTradetype(TradeTypeEnum.merchantCollect.getTypeName());// 业务功能模块名称
-					// ：网购
-					pmsAppTransInfo.setTradetime(UtilDate.getDateFormatter()); // 设置时间
-					pmsAppTransInfo.setMercid(merchantinfo.getMercId());
-					pmsAppTransInfo.setTradetypecode(TradeTypeEnum.merchantCollect.getTypeCode());// 业务功能模块编号
-					// ：17
-					pmsAppTransInfo.setOrderid(originalinfo.getV_oid());// 设置订单号
-					pmsAppTransInfo.setPaymenttype(PaymentCodeEnum.moBaoQuickPay.getTypeName());
-					pmsAppTransInfo.setPaymentcode(PaymentCodeEnum.moBaoQuickPay.getTypeCode());
-					BigDecimal factBigDecimal = new BigDecimal(factAmount);
-					BigDecimal orderAmountBigDecimal = new BigDecimal(factAmount);
-					pmsAppTransInfo.setBusinessNum(pmsBusinessPos.getBusinessnum());
-					pmsAppTransInfo.setFactamount(factBigDecimal.stripTrailingZeros().toPlainString());// 实际金额
-					pmsAppTransInfo.setOrderamount(orderAmountBigDecimal.stripTrailingZeros().toPlainString());// 订单金额
-					pmsAppTransInfo.setDrawMoneyType("1");// 普通提款
-					if ("0".equals(originalinfo.getV_type())) {
-						pmsAppTransInfo.setSettlementState("D0");
-					}
-					if ("1".equals(originalinfo.getV_type())) {
-
-						pmsAppTransInfo.setSettlementState("T1");
-					}
-
-					// 插入订单信息
-					Integer insertAppTrans = pmsAppTransInfoDao.insert(pmsAppTransInfo);
-					if (insertAppTrans == 1) {
-
-						// 查询订单信息
-						pmsAppTransInfo = pmsAppTransInfoDao.searchOrderInfo(pmsAppTransInfo.getOrderid());
-
-						String quickRateType = resultMap.get("QUICKRATETYPE").toString();// 快捷支付费率类型
-
-						// 获取o单第三方支付的费率
-						AppRateConfig appRate = new AppRateConfig();
-						appRate.setRateType(quickRateType);
-						appRate.setoAgentNo(oAgentNo);
-						AppRateConfig appRateConfig = appRateConfigDao.getByRateTypeAndoAgentNo(appRate);
-
-						if (appRateConfig == null) {
-							// 若查到的是空值，直接返回错误
-							// 若查到的是空值，直接返回错误
-							logger.info("没有查到相关费率配置：" + merchantinfo.getMobilephone());
-							return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
-
-						}
-
-						String isTop = appRateConfig.getIsTop();
-						String rate = appRateConfig.getRate();
-						String topPoundage = appRateConfig.getTopPoundage();// 封顶手续费
-						paymentAmount = pmsAppTransInfo.getFactamount();// 支付金额
-						String minPoundageStr = appRateConfig.getBottomPoundage();// 最低手续费
-						Double minPoundage = 0.0; // 附加费
-
-						if (StringUtils.isNotBlank(appRateConfig.getIsBottom())
-								&& appRateConfig.getIsBottom().equals("1")) {// 是否有清算费用，"1":有，“0”无
-							if (StringUtils.isNotBlank(minPoundageStr)) {
-								minPoundage = Double.parseDouble(minPoundageStr); // 清算手续费
-							} else {
-								// 若查到的是空值，直接返回错误
-								logger.info("没有查到相关费率附加费（最低手续费）：" + merchantinfo.getMobilephone());
-								return setResp("09", "没有查到相关费率配置,,请重试或联系客服");
-							}
-						}
-
-						BigDecimal payAmount = new BigDecimal("0");
-						BigDecimal dfactAmount = new BigDecimal(pmsAppTransInfo.getFactamount());
-						// 费率
-						BigDecimal fee = new BigDecimal(0);
-						Double settleFee = 0.0;
-						Double userfee = 0.0;
-						String rateStr = "";
-						// Double payfee = null;
-						// 计算结算金额
-						if ("1".equals(isTop)) {
-
-							rateStr = rate + "-" + topPoundage;
-							// 是封顶费率类型
-							fee = new BigDecimal(rate).multiply(dfactAmount);
-
-							if (fee.compareTo(new BigDecimal(topPoundage)) == 1) {
-								// 手续费大于封顶金额，按封顶金额处理
-								payAmount = dfactAmount
-										.subtract(new BigDecimal(topPoundage).subtract(new BigDecimal(minPoundage)));
-								fee = new BigDecimal(topPoundage).add(new BigDecimal(minPoundage));
-							} else {
-								// 按当前费率处理
-								rateStr = rate;
-								fee.add(new BigDecimal(minPoundage));
-								payAmount = dfactAmount.subtract(fee);
-							}
-
-						} else {
-							// 按当前费率处理
-							double dfpag = Double.parseDouble(merchantinfo.getPoundage());
-							double daifu = Double.parseDouble(merchantinfo.getCounter());
-							if (!"".equals(originalinfo.getV_userFee()) && originalinfo.getV_userFee() != null) {
-								userfee = Double.parseDouble(originalinfo.getV_userFee());
-							}
-
-							if (!"".equals(originalinfo.getV_settleUserFee())
-									&& originalinfo.getV_settleUserFee() != null) {
-								settleFee = Double.parseDouble(originalinfo.getV_settleUserFee());
-							}
-							if (originalinfo.getV_type().equals("1")) {
-								// 按当前费率处理
-								rateStr = rate;
-								if (Double.parseDouble(rateStr) <= userfee) {
-									BigDecimal num = dfactAmount.multiply(new BigDecimal(userfee));
-									if (num.doubleValue() / 100 >= daifu) {
-										fee = num;
-									} else {
-										fee = new BigDecimal(daifu * 100);
-									}
-									rateStr = userfee.toString();
-									payAmount = dfactAmount.subtract(fee);
-									logger.info("清算金额:" + paymentAmount);
-									if (payAmount.doubleValue() < 0) {
-										payAmount = new BigDecimal(0.00);
-									}
-
-								} else {
-									logger.info("费率低于成本费率：" + merchantinfo.getMercId());
-									return setResp("12", "费率低于成本费率");
-								}
-							} else if (originalinfo.getV_type().equals("0")) {
-
-								// 按当前费率处理
-								rateStr = rate;
-								if (Double.parseDouble(rateStr) <= userfee) {
-									fee = new BigDecimal(userfee).multiply(dfactAmount).add(new BigDecimal(minPoundage));
-								} else {
-									logger.info("费率低于成本费率：" + merchantinfo.getMercId());
-									return setResp("12", "费率低于成本费率");
-
-								}
-								if ("10044".equals(pmsBusinessPos.getBusinessnum())) {
-									if (dfpag > settleFee) {
-										logger.info("手续费低于最小手续费：" + merchantinfo.getMercId());
-										return setResp("20", "手续费低于最小手续费");
-									}
-
-								} else {
-
-									if (dfpag > settleFee) {
-										settleFee = dfpag;
-									}
-								}
-								switch (pmsBusinessPos.getBusinessnum()) {
-
-								case "1711030001":// 沈阳银盛
-									payAmount = dfactAmount.subtract(fee).subtract(new BigDecimal(100));
-									fee = fee.add(new BigDecimal(100));
-									break;
-								case "88882017092010001121":// 赢酷快捷
-									payAmount = dfactAmount.subtract(fee).subtract(new BigDecimal(20));
-									fee = fee.add(new BigDecimal(20));
-									break;
-								default:
-									/*
-									 * payAmount = dfactAmount.subtract(fee) .subtract(new
-									 * BigDecimal(settleFee).multiply(new BigDecimal(100))); fee = fee.add(new
-									 * BigDecimal(settleFee).multiply(new BigDecimal(100)));
-									 */
-									BigDecimal num = dfactAmount.multiply(new BigDecimal(userfee));
-									if (num.doubleValue() / 100 >= daifu) {
-										fee = num;
-									} else {
-										fee = new BigDecimal(daifu * 100);
-									}
-									rateStr = userfee.toString();
-									payAmount = dfactAmount.subtract(fee);
-									logger.info("清算金额:" + paymentAmount);
-									if (payAmount.doubleValue() < 0) {
-										payAmount = new BigDecimal(0.00);
-									}
-									break;
-
-								}
-								logger.info("清算金额:" + paymentAmount);
-								if (payAmount.doubleValue() < 0) {
-									payAmount = new BigDecimal(0.00);
-								}
-							}
-						}
-
-						// 设置结算金额
-						pmsAppTransInfo.setPayamount(payAmount.toString());// 结算金额
-						pmsAppTransInfo.setRate(rateStr);// 0.50_35 || 0.50
-						pmsAppTransInfo.setPoundage(fee.toString());
-						pmsAppTransInfo.setDrawMoneyType("1");// 普通提款
-						// 转换double为int
-						Integer paymentAmountInt = (int) Double.parseDouble(paymentAmount);
-
-						// 验证支付方式是否开启
-						payCheckResult = iPublicTradeVerifyService.totalVerify(paymentAmountInt,
-								TradeTypeEnum.merchantCollect, PaymentCodeEnum.moBaoQuickPay, oAgentNo,
-								merchantinfo.getMercId());
-						if (!payCheckResult.getErrCode().equals("0")) {
-							// 交易不支持
-
-							logger.info("不支持的支付方式，oAagentNo:" + oAgentNo + ",payType:"
-									+ PaymentCodeEnum.moBaoQuickPay.getTypeCode());
-							return setResp("13", "暂不支持该交易方式");
-						}
-						// 查看当前交易是否已经生成了流水表
-						PospTransInfo pospTransInfo = null;
-						// 流水表是否需要更新的标记 0 insert，1：update
-						int insertOrUpdateFlag = 0;
-						// 生成上送流水号
-						String transOrderId = generateTransOrderId(TradeTypeEnum.merchantCollect,
-								PaymentCodeEnum.moBaoQuickPay);
-						if ((pospTransInfo = pospTransInfoDAO.searchByOrderId(pmsAppTransInfo.getOrderid())) != null) {
-							// 已经存在，修改流水号，设置pospsn为空
-							logger.info("订单号：" + pmsAppTransInfo.getOrderid() + ",生成上送通道的流水号：" + transOrderId);
-							pospTransInfo.setTransOrderId(originalinfo.getV_oid());
-							pospTransInfo.setResponsecode("99");
-							pospTransInfo.setPospsn("");
-							insertOrUpdateFlag = 1;
-						} else {
-							// 不存在流水，生成一个流水
-							pospTransInfo = generateTransFromAppTrans(pmsAppTransInfo);
-
-							System.out.println("流水表生成的时间:" + pospTransInfo.getSenddate());
-							// 设置上送流水号
-							pospTransInfo.setTransOrderId(originalinfo.getV_oid());
-							insertOrUpdateFlag = 0;
-						}
-						// 插入流水表信息
-						if (insertOrUpdateFlag == 0) {
-							// 插入一条流水
-							pospTransInfoDAO.insert(pospTransInfo);
-						} else if (insertOrUpdateFlag == 1) {
-							// 更新一条流水
-							pospTransInfoDAO.updateByOrderId(pospTransInfo);
-						}
-						logger.info("修改订单信息");
-						logger.info(pmsAppTransInfo);
-						insertProfit(originalinfo.getV_oid(), originalinfo.getV_txnAmt(), merchantinfo,
-								PaymentCodeEnum.moBaoQuickPay.getTypeName(), originalinfo.getV_type());
-						int num = pmsAppTransInfoDao.update(pmsAppTransInfo);
-						if (num > 0) {
-
-							logger.info("上游通道商户号:" + pmsBusinessPos.getChannelnum());
-							// 商户号码
-							String merId = pmsBusinessPos.getBusinessnum();// 818310048160000
-							// 商户号私钥
-							String merKey = pmsBusinessPos.getKek();
-							PayBankInfo bank = new PayBankInfo();
-							bank.setBank_pmsbankNo(originalinfo.getV_settlePmsBankNo());
-							bank = payBankInfoDao.selectByBankInfo(bank);
-							logger.info("查询结算商户银行信息:" + bank);
-							PayBankInfo bank2 = new PayBankInfo();
-							bank2.setBank_pmsbankNo(originalinfo.getV_pmsBankNo());
-							bank2 = payBankInfoDao.selectByBankInfo(bank2);
-							logger.info("查询交易商户银行信息:" + bank2);
-							int number = 0;
-							String url = "";
-							String sign = "";
-							JSONObject json;
-							Calendar now = Calendar.getInstance();
-							String minute = "";
-							String month = "";
-							SmsBalanceRequest smsBalanceRequest;
-							SmsBalanceResponse smsVarableResponse;
-							switch (pmsBusinessPos.getChannelnum()) {
-							/*
-							 * case "936640995770001": // 摩宝快捷收银台 case "936640995770002": // 摩宝快捷银联界面 case
-							 * "88882017092010001121": // 赢酷快捷 case "000000003":// 易生快捷 case
-							 * "1120180427134034001":// 银生宝快捷
-							 */
-
-							case "MBXHF":
-							case "YK":
-							case "YSKJ":
-							case "YSB":
-								if ("936640995770000".equals(pmsBusinessPos.getBusinessnum())) {
-									Map<String, String> transmap = new LinkedHashMap<String, String>();
-									transmap.put("versionId", "001"); // 版本号 固定
-									transmap.put("businessType", "1401"); // 预交易 1401
-									transmap.put("merId", "936640995770000"); // 商户号
-									transmap.put("orderId", originalinfo.getV_oid()); // 订单号
-									transmap.put("transDate", originalinfo.getV_time()); // 时间 yymmddhhmmss
-									transmap.put("transAmount", originalinfo.getV_txnAmt()); // 金额
-																								// 单位元，对于正式商户最低支付金额为10元
-									transmap.put("cardByName",
-											MD5Util.encode(originalinfo.getV_realName().getBytes("UTF-8"))); // 此处的MD5util为Base64加密
-									transmap.put("cardByNo", originalinfo.getV_cardNo()); // 卡号
-									if ("1".equals(originalinfo.getV_accountType())) {
-										transmap.put("cardType", "01"); // 卡类型01借记卡
-
-									} else if ("2".equals(originalinfo.getV_accountType())) {
-
-										transmap.put("cardType", "00"); // 卡类型00贷记卡
-										transmap.put("expireDate", originalinfo.getV_expired()); // 有效期
-										transmap.put("CVV", originalinfo.getV_cvn2()); // CVN
-									}
-									// transmap.put("bankCode",mbReqest.getBankCode()); //可为空 银行代码
-									// transmap.put("openBankName",mbReqest.getOpenBankName());//可为空 银行代码
-									transmap.put("cerType", "01"); // 证件类型 01 身份证
-									transmap.put("cerNumber", originalinfo.getV_cert_no());// 身份证
-									transmap.put("mobile", originalinfo.getV_phone()); // 手机号
-									transmap.put("isAcceptYzm", "00"); // 默认00
-									transmap.put("backNotifyUrl", MBUtil.notifyUrl);
-									transmap.put("instalTransFlag", "01"); // 分期标志
-									// 需要加密的字符串
-									String signstr = EncodeUtil.getUrlStr(transmap);
-									logger.info("需要签名的明文" + signstr);
-									String signtrue = MD5Util.MD5Encode(signstr + merKey);
-									transmap.put("signType", "MD5");
-									transmap.put("signData", signtrue);
-									// AES加密
-									String transUrlStr = EncodeUtil.getUrlStr(transmap);
-									//
-									String transData = AESUtil.encrypt(transUrlStr, merKey);
-									// 生产地址
-									String testUrl = MBUtil.quick;
-									String str = DemoBase.requestBody(merId, transData, testUrl);
-									// 获取交易返回结果
-									logger.info(str);
-									ObjectMapper om = new ObjectMapper();
-									Map<String, String> maps = new HashMap<>();
-									maps = om.readValue(str, Map.class);
-									retMap.put("v_mid", originalinfo.getV_mid());
-									retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-									retMap.put("v_time", originalinfo.getV_time());
-									retMap.put("v_oid", originalinfo.getV_oid());
-									if ("00".equals(maps.get("status"))) {
-										if ("01".equals(maps.get("refCode"))) {
-											OriginalOrderInfo info = new OriginalOrderInfo();
-											info.setMerchantOrderId(maps.get("ksPayOrderId"));
-											info.setOrderId(originalinfo.getV_oid());
-											number = originalDao.update(info);
-											retMap.put("v_code", "00");
-											retMap.put("v_msg", "请求成功");
-										} else if ("02".equals(maps.get("refCode"))) {
-											retMap.put("v_code", "15");
-											retMap.put("v_msg", "请求失败");
-										} else {
-											retMap.put("v_code", "15");
-											retMap.put("v_msg", "请求失败");
-										}
-									} else if ("01".equals(maps.get("status"))) {
-										retMap.put("v_code", "15");
-										retMap.put("v_msg", "请求失败");
-									} else if ("02".equals(maps.get("status"))) {
-										retMap.put("v_code", "15");
-										retMap.put("v_msg", "请求失败");
-									}
-								} else if ("000000001".equals(pmsBusinessPos.getBusinessnum())) {
-									String channelKey = YSUtil.channelKey;
-									String channel_sign_method = "SHA256";
-									Map<String, Object> reqMap = new TreeMap<String, Object>();
-									reqMap.put("sp_id", YSUtil.sp_id);// 服务商号
-									reqMap.put("mch_id", YSUtil.merId2);// 商户号
-									reqMap.put("out_trade_no", originalinfo.getV_oid());
-									reqMap.put("id_type", "01");
-									reqMap.put("acc_name", originalinfo.getV_realName());// 持卡人姓名
-									reqMap.put("acc_type", "PERSONNEL");// PERSONNEL：对私 CORPORATE：对公
-									reqMap.put("in_acc_no", originalinfo.getV_settleCardNo());// 卡号
-									reqMap.put("mobile", originalinfo.getV_phone());// 手机号
-									reqMap.put("id_no", originalinfo.getV_cert_no());// 证件号
-									reqMap.put("settle_rate", originalinfo.getV_settleUserFee());// 结算费率
-									reqMap.put("extra_rate", originalinfo.getV_userFee());// T0费率
-									Date t = new Date();
-									java.util.Calendar cal = java.util.Calendar.getInstance();
-									cal.setTime(t);
-									long sys_timestamp = cal.getTimeInMillis();
-									reqMap.put("timestamp", sys_timestamp);// 时间戳
-
-									StringBuilder sb = new StringBuilder();
-									Set<String> keySet = reqMap.keySet();
-									Iterator<String> iter = keySet.iterator();
-									while (iter.hasNext()) {
-										String key = iter.next();
-										sb.append(key);
-										sb.append("=");
-										sb.append(reqMap.get(key));
-										sb.append("&");
-									}
-									sign = SwpHashUtil.getSign(sb.toString() + "key=" + channelKey, channelKey,
-											channel_sign_method);
-									reqMap.put("sign", sign);
-
-									sb.append("sign");
-									sb.append("=");
-									sb.append(sign);
-									System.out.println(sb.toString());
-									url = YSUtil.url + "/swp/up/settlecheck.do";
-									HttpResponse httpResponse = HttpUtils.doPost(url, "", sb.toString(),
-											"application/x-www-form-urlencoded; charset=UTF-8");
-									String resp = EntityUtils.toString(httpResponse.getEntity());
-									System.out.println("接受请求:" + resp);
-									json = JSONObject.parseObject(resp);
-
-									if ("SUCCESS".equals(json.getString("status"))) {
-										if ("SUCCESS".equals(json.getString("trade_state"))) {
-											PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
-											merchartInfo.setAccount(json.getString("sub_mch_id"));// 账号
-											merchartInfo.setMerchartId(originalinfo.getV_mid());
-											merchartInfo.setMerchartName(merchantList.get(0).getMercName());
-											merchartInfo.setMerchartNameSort(merchantList.get(0).getShortname());
-											merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
-											merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
-											merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
-											merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
-											// merchartInfo.setAccountType(payRequest.getBusinessType());//账户类型
-											merchartInfo.setBankName(bank2.getBank_name());// 开户行
-											merchartInfo.setPmsBankNo(originalinfo.getV_pmsBankNo());// 联行号
-											merchartInfo.setProvince(bank2.getBank_province());// 省份
-											merchartInfo.setCity(bank2.getBank_city());// 城市
-											merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
-											// merchartInfo.setWithdrawDepositSingleFee(payRequest.getWithdrawDepositSingleFee());//提现单笔手续费
-											merchartInfo.setoAgentNo("100333");
-											merchartInfo.setRateCode(originalinfo.getV_mid());
-											int i = weixinService.updateRegister(merchartInfo);
-											logger.info("易生修改状态:" + i);
-											if (i > 0) {
-												channelKey = YSUtil.channelKey;
-												channel_sign_method = "SHA256";
-												reqMap.put("sp_id", YSUtil.sp_id);// 服务商号
-												reqMap.put("mch_id", YSUtil.merId2);// 商户号
-												reqMap.put("out_trade_no", originalinfo.getV_oid());
-												reqMap.put("id_type", "01");
-												reqMap.put("sub_mch_id", json.getString("sub_mch_id"));
-												reqMap.put("acc_name", originalinfo.getV_realName());// 持卡人姓名
-												reqMap.put("cvn2", originalinfo.getV_cvn2());//
-												reqMap.put("expired", originalinfo.getV_expired());
-												reqMap.put("acc_no", originalinfo.getV_cardNo());// 卡号
-												reqMap.put("bankcode", bank2.getBank_code());// 银行代码
-												reqMap.put("mobile", originalinfo.getV_phone());// 手机号
-												reqMap.put("id_no", originalinfo.getV_cert_no());// 证件号
-												t = new Date();
-												cal = java.util.Calendar.getInstance();
-												cal.setTime(t);
-												sys_timestamp = cal.getTimeInMillis();
-												reqMap.put("timestamp", sys_timestamp);// 时间戳
-
-												sb = new StringBuilder();
-												keySet = reqMap.keySet();
-												iter = keySet.iterator();
-												while (iter.hasNext()) {
-													String key = iter.next();
-													sb.append(key);
-													sb.append("=");
-													sb.append(reqMap.get(key));
-													sb.append("&");
-												}
-												sign = SwpHashUtil.getSign(sb.toString() + "key=" + channelKey, channelKey,
-														channel_sign_method);
-												reqMap.put("sign", sign);
-
-												sb.append("sign");
-												sb.append("=");
-												sb.append(sign);
-												System.out.println(sb.toString());
-												url = YSUtil.url + "/swp/up/bindCardBack.do";
-												httpResponse = HttpUtils.doPost(url, "", sb.toString(),
-														"application/x-www-form-urlencoded; charset=UTF-8");
-												resp = EntityUtils.toString(httpResponse.getEntity());
-												System.out.println("接受请求:" + resp);
-												json = JSONObject.parseObject(resp);
-
-												if ("SUCCESS".equals(json.getString("status"))) {
-													if ("SUCCESS".equals(json.getString("trade_state"))) {
-														PmsDaifuMerchantInfo model = new PmsDaifuMerchantInfo();
-														model.setMercId(originalinfo.getV_mid());
-														model.setBatchNo(originalinfo.getV_oid());
-														model.setIdentity(json.getString("swpaccid"));
-														model.setCardno(originalinfo.getV_cardNo());
-														model.setRealname(originalinfo.getV_realName());
-														model.setPmsbankno(json.getString("trade_state_desc"));
-														model.setTransactionType("快捷绑卡");
-														model.setOagentno("100333");
-														model.setResponsecode("00");
-														i = pmsDaifuMerchantInfoDao.insert(model);
-														if (i > 0) {
-															logger.info("插入鉴权订单成功！！");
-															channelKey = YSUtil.channelKey;
-															channel_sign_method = "SHA256";
-															Map<String, Object> reqMap1 = new TreeMap<String, Object>();
-															reqMap1.put("sp_id", YSUtil.sp_id);
-															reqMap1.put("mch_id", pmsBusinessPos.getBusinessnum());// 商户号YSUtil.merId1
-															reqMap1.put("out_trade_no", originalinfo.getV_oid());
-															reqMap1.put("swpaccid", json.getString("swpaccid"));
-															Double amount = Double.parseDouble(originalinfo.getV_txnAmt())
-																	* 100;
-															reqMap1.put("total_fee", amount.toString());
-															t = new Date();
-															cal = java.util.Calendar.getInstance();
-															cal.setTime(t);
-															sys_timestamp = cal.getTimeInMillis();
-															reqMap1.put("timestamp", sys_timestamp);
-
-															StringBuilder sb1 = new StringBuilder();
-															keySet = reqMap.keySet();
-															iter = keySet.iterator();
-															while (iter.hasNext()) {
-																String key = iter.next();
-																sb1.append(key);
-																sb1.append("=");
-																sb1.append(reqMap.get(key));
-																sb1.append("&");
-															}
-															sign = SwpHashUtil.getSign(sb1.toString() + "key=" + channelKey,
-																	channelKey, channel_sign_method);
-															reqMap1.put("sign", sign);
-
-															sb1.append("sign");
-															sb1.append("=");
-															sb1.append(sign);
-															logger.info("签名串:" + sb1.toString());
-															url = YSUtil.url + "/swp/up/sms.do";
-															httpResponse = HttpUtils.doPost(url, "", sb.toString(),
-																	"application/x-www-form-urlencoded; charset=UTF-8");
-															resp = EntityUtils.toString(httpResponse.getEntity());
-															logger.info("接受请求:" + resp);
-															json = JSONObject.parseObject(resp);
-															if ("SUCCESS".equals(json.getString("status"))) {
-																if ("SUCCESS".equals(json.getString("trade_state"))) {
-																	OriginalOrderInfo info = new OriginalOrderInfo();
-																	info.setOrderId(originalinfo.getV_oid());
-																	info.setMerchantOrderId(json.getString("sys_trade_no"));
-																	;
-																	number = originalDao.update(info);
-																	if (number > 0) {
-																		retMap.put("v_mid", originalinfo.getV_mid());
-																		retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-																		retMap.put("v_time", originalinfo.getV_time());
-																		retMap.put("v_code", "00");
-																		retMap.put("v_msg", "请求成功");
-																		retMap.put("v_oid", originalinfo.getV_oid());
-																	}
-
-																} else {
-																	retMap.put("v_code", "15");
-																	retMap.put("v_msg", "请求失败");
-																	return retMap;
-																}
-															} else {
-																retMap.put("v_code", "15");
-																retMap.put("v_msg", "请求失败");
-																return retMap;
-															}
-														}
-													} else {
-														retMap.put("v_code", "15");
-														retMap.put("v_msg", "请求失败");
-														return retMap;
-													}
-												} else {
-													retMap.put("v_code", "15");
-													retMap.put("v_msg", "请求失败");
-													return retMap;
-												}
-
-											}
-										} else {
-											retMap.put("v_code", "15");
-											retMap.put("v_msg", "请求失败");
-											return retMap;
-										}
-									} else {
-										retMap.put("v_code", "15");
-										retMap.put("v_msg", "请求失败");
-										return retMap;
-									}
-								} else {
-									number = now.get(Calendar.MONTH) + 1;
-									if (number < 10) {
-										month = "0" + number;
-									}
-									if (now.get(Calendar.MINUTE) < 10) {
-										minute = "0" + now.get(Calendar.MINUTE);
-									}
-									String time = now.get(Calendar.YEAR) + "年" + month + "月"
-											+ now.get(Calendar.DAY_OF_MONTH) + "日" + now.get(Calendar.HOUR_OF_DAY) + ":"
-											+ minute;
-
-									merchantinfo = merchantList.get(0);
-									String phone = originalinfo.getV_phone();// 法人手机号
-
-									// 查询余额
-									smsBalanceRequest = new SmsBalanceRequest(ACCOUNT, PSWD);
-
-									String balancerequestJson = JSON.toJSONString(smsBalanceRequest);
-
-									logger.info("查询短信余额前上送的数据:" + balancerequestJson);
-
-									String balanceresponse = ChuangLanSmsUtil.sendSmsByPost(smsBalanceRequestUrl,
-											balancerequestJson);
-
-									logger.info("查询短信余额响应信息 : " + balanceresponse);
-
-									smsVarableResponse = JSON.parseObject(balanceresponse, SmsBalanceResponse.class);
-
-									logger.info("查询余额实体信息 : " + smsVarableResponse);
-
-									if ("0".equals(smsVarableResponse.getCode())) {
-										logger.info("剩余可用余额条数:" + smsVarableResponse.getBalance());
-
-										if (Integer.parseInt(smsVarableResponse.getBalance()) > 0) {
-
-											Integer num1 = (int) ((Math.random() * 9 + 1) * 100000);
-
-											logger.info("上送的验证码：" + num1);
-
-											// 验证码实现
-
-											String params = originalinfo.getV_phone() + "," + num1.toString() + "," + time;
-
-											String massage = MSG + num1.toString();
-											SmsVariableRequest smsVariableRequest = new SmsVariableRequest(ACCOUNT, PSWD,
-													MSG, params, REPORT);
-											SmsSendRequest smsSingleRequest = new SmsSendRequest(ACCOUNT, PSWD, massage,
-													phone, REPORT);
-
-											String varrequestJson = JSON.toJSONString(smsVariableRequest);
-
-											logger.info("普通短信请求前数据:" + varrequestJson);
-											String smsresponse = ChuangLanSmsUtil.sendSmsByPost(smsVariableRequestUrl,
-													varrequestJson);
-
-											logger.info("普通短信响应数据:" + smsresponse);
-											SmsSendResponse smsSingleResponse = JSON.parseObject(smsresponse,
-													SmsSendResponse.class);
-											SmsVariableResponse smsVariableResponse = JSON.parseObject(smsresponse,
-													SmsVariableResponse.class);
-											if ("0".equals(smsVariableResponse.getCode())) {
-												OriginalOrderInfo info = new OriginalOrderInfo();
-												info.setOrderId(originalinfo.getV_oid());
-												info.setSumCode(num1.toString());
-												number = originalDao.update(info);
-												if (number > 0) {
-													retMap.put("v_mid", originalinfo.getV_mid());
-													retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-													retMap.put("v_time", originalinfo.getV_time());
-													retMap.put("v_code", "00");
-													retMap.put("v_msg", "请求成功");
-													retMap.put("v_oid", originalinfo.getV_oid());
-												}
-											}
-										} else {
-
-											logger.info("余额不足，请充值" + smsVarableResponse.getCode());
-											// retMap.put("002", "余额不足,请充值");
-										}
-
-									} else {
-
-										logger.info("信息有误，请充重新提交" + smsVarableResponse.getCode());
-										return setResp("07", "系统异常，请重试或联系客服");
-									}
-								}
-
-								break;
-							case "YBLS":// 易宝快捷
-								if ("1".equals(originalinfo.getV_type())) {
-									now = Calendar.getInstance();
-									number = now.get(Calendar.MONTH) + 1;
-									minute = "";
-									month = "";
-									if (number < 10) {
-										month = "0" + number;
-									}
-									if (now.get(Calendar.MINUTE) < 10) {
-										minute = "0" + now.get(Calendar.MINUTE);
-									}
-									String time = now.get(Calendar.YEAR) + "年" + month + "月"
-											+ now.get(Calendar.DAY_OF_MONTH) + "日" + now.get(Calendar.HOUR_OF_DAY) + ":"
-											+ minute;
-
-									merchantinfo = merchantList.get(0);
-									String phone = originalinfo.getV_phone();// 法人手机号
-
-									// 查询余额
-									smsBalanceRequest = new SmsBalanceRequest(ACCOUNT, PSWD);
-
-									String balancerequestJson = JSON.toJSONString(smsBalanceRequest);
-
-									logger.info("查询短信余额前上送的数据:" + balancerequestJson);
-
-									String balanceresponse = ChuangLanSmsUtil.sendSmsByPost(smsBalanceRequestUrl,
-											balancerequestJson);
-
-									logger.info("查询短信余额响应信息 : " + balanceresponse);
-
-									smsVarableResponse = JSON.parseObject(balanceresponse, SmsBalanceResponse.class);
-
-									logger.info("查询余额实体信息 : " + smsVarableResponse);
-
-									if ("0".equals(smsVarableResponse.getCode())) {
-										logger.info("剩余可用余额条数:" + smsVarableResponse.getBalance());
-
-										if (Integer.parseInt(smsVarableResponse.getBalance()) > 0) {
-
-											Integer num1 = (int) ((Math.random() * 9 + 1) * 100000);
-
-											logger.info("上送的验证码：" + num1);
-
-											// 验证码实现
-
-											String params = originalinfo.getV_phone() + "," + num1.toString() + "," + time;
-
-											String massage = MSG + num1.toString();
-											SmsVariableRequest smsVariableRequest = new SmsVariableRequest(ACCOUNT, PSWD,
-													MSG, params, REPORT);
-											SmsSendRequest smsSingleRequest = new SmsSendRequest(ACCOUNT, PSWD, massage,
-													phone, REPORT);
-
-											String varrequestJson = JSON.toJSONString(smsVariableRequest);
-
-											logger.info("普通短信请求前数据:" + varrequestJson);
-											String smsresponse = ChuangLanSmsUtil.sendSmsByPost(smsVariableRequestUrl,
-													varrequestJson);
-
-											logger.info("普通短信响应数据:" + smsresponse);
-											SmsSendResponse smsSingleResponse = JSON.parseObject(smsresponse,
-													SmsSendResponse.class);
-											SmsVariableResponse smsVariableResponse = JSON.parseObject(smsresponse,
-													SmsVariableResponse.class);
-											if ("0".equals(smsVariableResponse.getCode())) {
-												OriginalOrderInfo info = new OriginalOrderInfo();
-												info.setOrderId(originalinfo.getV_oid());
-												info.setSumCode(num1.toString());
-												number = originalDao.update(info);
-												if (number > 0) {
-													retMap.put("v_mid", originalinfo.getV_mid());
-													retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-													retMap.put("v_time", originalinfo.getV_time());
-													retMap.put("v_code", "00");
-													retMap.put("v_msg", "请求成功");
-													retMap.put("v_oid", originalinfo.getV_oid());
-												}
-											}
-										} else {
-
-											logger.info("余额不足，请充值" + smsVarableResponse.getCode());
-											// retMap.put("002", "余额不足,请充值");
-										}
-
-									} else {
-
-										logger.info("信息有误，请充重新提交" + smsVarableResponse.getCode());
-										return setResp("07", "系统异常，请重试或联系客服");
-									}
-								}
-								break;
-							case "MBYLM":// 摩宝快捷
-
-								Map<String, String> transmap = new LinkedHashMap<String, String>();
-								transmap.put("versionId", "001"); // 版本号 固定
-								transmap.put("businessType", "1401"); // 预交易 1401
-								transmap.put("merId", "936640995770000"); // 商户号
-								transmap.put("orderId", originalinfo.getV_oid()); // 订单号
-								transmap.put("transDate", originalinfo.getV_time()); // 时间 yymmddhhmmss
-								transmap.put("transAmount", originalinfo.getV_txnAmt()); // 金额
-																							// 单位元，对于正式商户最低支付金额为10元
-								transmap.put("cardByName", MD5Util.encode(originalinfo.getV_realName().getBytes("UTF-8"))); // 此处的MD5util为Base64加密
-								transmap.put("cardByNo", originalinfo.getV_cardNo()); // 卡号
-								if ("1".equals(originalinfo.getV_accountType())) {
-									transmap.put("cardType", "01"); // 卡类型01借记卡
-
-								} else if ("2".equals(originalinfo.getV_accountType())) {
-
-									transmap.put("cardType", "00"); // 卡类型00贷记卡
-									transmap.put("expireDate", originalinfo.getV_expired()); // 有效期
-									transmap.put("CVV", originalinfo.getV_cvn2()); // CVN
-								}
-								// transmap.put("bankCode",mbReqest.getBankCode()); //可为空 银行代码
-								// transmap.put("openBankName",mbReqest.getOpenBankName());//可为空 银行代码
-								transmap.put("cerType", "01"); // 证件类型 01 身份证
-								transmap.put("cerNumber", originalinfo.getV_cert_no());// 身份证
-								transmap.put("mobile", originalinfo.getV_phone()); // 手机号
-								transmap.put("isAcceptYzm", "00"); // 默认00
-								transmap.put("backNotifyUrl", MBUtil.notifyUrl);
-								transmap.put("instalTransFlag", "01"); // 分期标志
-								// 需要加密的字符串
-								String signstr = EncodeUtil.getUrlStr(transmap);
-								logger.info("需要签名的明文" + signstr);
-								String signtrue = MD5Util.MD5Encode(signstr + merKey);
-								transmap.put("signType", "MD5");
-								transmap.put("signData", signtrue);
-								// AES加密
-								String transUrlStr = EncodeUtil.getUrlStr(transmap);
-								//
-								String transData = AESUtil.encrypt(transUrlStr, merKey);
-								// 生产地址
-								String testUrl = MBUtil.quick;
-								String str = DemoBase.requestBody(merId, transData, testUrl);
-								// 获取交易返回结果
-								logger.info(str);
-								ObjectMapper om = new ObjectMapper();
-								Map<String, String> maps = new HashMap<>();
-								maps = om.readValue(str, Map.class);
-								retMap.put("v_mid", originalinfo.getV_mid());
-								retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-								retMap.put("v_time", originalinfo.getV_time());
-								retMap.put("v_oid", originalinfo.getV_oid());
-								if ("00".equals(maps.get("status"))) {
-									if ("01".equals(maps.get("refCode"))) {
-										OriginalOrderInfo info = new OriginalOrderInfo();
-										info.setMerchantOrderId(maps.get("ksPayOrderId"));
-										info.setOrderId(originalinfo.getV_oid());
-										number = originalDao.update(info);
-										retMap.put("v_code", "00");
-										retMap.put("v_msg", "请求成功");
-									} else if ("02".equals(maps.get("refCode"))) {
-										retMap.put("v_code", "15");
-										retMap.put("v_msg", "请求失败");
-									} else {
-										retMap.put("v_code", "15");
-										retMap.put("v_msg", "请求失败");
-									}
-								} else if ("01".equals(maps.get("status"))) {
-									retMap.put("v_code", "15");
-									retMap.put("v_msg", "请求失败");
-								} else if ("02".equals(maps.get("status"))) {
-									retMap.put("v_code", "15");
-									retMap.put("v_msg", "请求失败");
-								}
-								break;
-							case "HLB":// 合利宝快捷
-								LinkedHashMap<String, String> map = new LinkedHashMap<>();
-								try {
-									map.put("P1_bizType", "QuickPayBankCardPay");
-									map.put("P2_customerNumber", "C" + pmsBusinessPos.getBusinessnum());
-									map.put("P3_userId", originalinfo.getV_oid());// 170000000002
-									map.put("P4_orderId", originalinfo.getV_oid());
-									map.put("P5_timestamp", originalinfo.getV_time());
-									map.put("P6_payerName", originalinfo.getV_realName());// URLEncoder.encode("安晓楠","UTF-8")
-									map.put("P7_idCardType", "IDCARD");
-									map.put("P8_idCardNo", originalinfo.getV_cert_no());// URLEncoder.encode("130722198710107446","UTF-8")
-									map.put("P9_cardNo", originalinfo.getV_cardNo());// URLEncoder.encode("5268550479591851","UTF-8")
-									// map.put("P10_year",
-									// hlbRequest.getYear()==null?"":hlbRequest.getYear());//URLEncoder.encode("20","UTF-8")
-									// map.put("P11_month",hlbRequest.getMonth()==null?"":hlbRequest.getMonth());//URLEncoder.encode("07","UTF-8");
-									map.put("P12_cvv2", originalinfo.getV_cvn2() == null ? "" : originalinfo.getV_cvn2());// URLEncoder.encode("862","UTF-8")
-									map.put("P13_phone", originalinfo.getV_phone());// URLEncoder.encode("15652000669","UTF-8")
-									map.put("P14_currency", "CNY");
-									map.put("P15_orderAmount", Double.parseDouble(originalinfo.getV_txnAmt()) + "");
-									map.put("P16_goodsName", originalinfo.getV_productDesc());
-									map.put("P17_goodsDesc", originalinfo.getV_productDesc());
-									map.put("P18_terminalType", "IMEI");
-									map.put("P19_terminalId", originalinfo.getV_oid());
-									map.put("P20_orderIp", "127.0.0.1");
-									// map.put("P21_period",
-									// hlbRequest.getPeriod()==null?"1":hlbRequest.getPeriod());
-									// map.put("P22_periodUnit",
-									// hlbRequest.getPeriodUnit()==null?"Day":hlbRequest.getPeriodUnit());
-									map.put("P23_serverCallbackUrl", HLBUtil.notifyUrl);
-									logger.info("签名之前的数据:" + map);
-									String key = pmsBusinessPos.getKek();
-									String oriMessage = MyBeanUtils.getSigned(map, null, key);
-									logger.info("签名原文串：" + oriMessage);
-									sign = Disguiser.disguiseMD5(oriMessage, "UTF-8");
-									map.put("sign", sign);
-									Map<String, Object> resultMap1 = HttpClientService.getHttpResp(map, HLBUtil.url);
-									String s = resultMap1.get("response").toString();
-									System.out.println(s);
-									json = JSONObject.parseObject(s);
-									if ("0000".equals(json.getString("rt2_retCode"))) {
-										map.put("P1_bizType", "QuickPaySendValidateCode");
-										map.put("P2_customerNumber", "C" + pmsBusinessPos.getBusinessnum());
-										map.put("P3_orderId", originalinfo.getV_oid());
-										map.put("P4_timestamp", originalinfo.getV_time());
-										map.put("P5_phone", originalinfo.getV_phone());
-										logger.info("签名之前的数据:" + map);
-										// String key=pmsBusinessPos.getKek();
-										oriMessage = MyBeanUtils.getSigned(map, null, key);
-										logger.info("签名原文串：" + oriMessage);
-										sign = Disguiser.disguiseMD5(oriMessage, "UTF-8");
-										map.put("sign", sign);
-										Map<String, Object> resultMap2 = HttpClientService.getHttpResp(map, HLBUtil.url);
-										logger.info("获取短信验证码返回参数:" + JSON.toJSONString(resultMap));
-										s = resultMap2.get("response").toString();
-										System.out.println(s);
-										json = JSONObject.parseObject(s);
-										if ("0000".equals(json.getString("rt2_retCode"))) {
-											retMap.put("respCode", "00");
-											retMap.put("type", originalinfo.getV_type());
-											retMap.put("merNo", originalinfo.getV_mid());
-											retMap.put("phone", json.getString("rt6_phone"));
-											retMap.put("respMsg", json.getString("rt3_retMsg"));
-											retMap.put("orderId", json.getString("rt5_orderId"));
-
-										} else {
-											retMap.put("respCode", "15");
-											retMap.put("type", originalinfo.getV_type());
-											retMap.put("merNo", originalinfo.getV_mid());
-											retMap.put("phone", json.getString("rt6_phone"));
-											retMap.put("respMsg", json.getString("rt3_retMsg"));
-											retMap.put("orderId", json.getString("rt5_orderId"));
-										}
-
-									} else {
-										retMap.put("respCode", "01");
-										retMap.put("type", originalinfo.getV_type());
-										retMap.put("merNo", originalinfo.getV_mid());
-										retMap.put("userId", originalinfo.getV_oid());
-										retMap.put("respMsg", json.getString("rt3_retMsg"));
-										retMap.put("orderId", json.getString("rt5_orderId"));
-									}
-									logger.info("下单返回参数:" + JSON.toJSONString(resultMap));
-
-								} catch (Exception e) {
-									logger.info("下单" + e);
-								}
-								break;
-							case "GZHM":// 广州恒明有积分快捷
-								JSONObject requestObj = new JSONObject();
-								requestObj.put("ordernumber", originalinfo.getV_oid());
-								requestObj.put("merchantid", "M" + pmsBusinessPos.getBusinessnum());
-								requestObj.put("username", originalinfo.getV_realName());
-								requestObj.put("userpid", originalinfo.getV_pmsBankNo());
-								requestObj.put("usercardno", originalinfo.getV_cardNo());
-								requestObj.put("usertel", originalinfo.getV_phone());
-								requestObj.put("amount", originalinfo.getV_txnAmt());// 单位分 100=1元
-								if ("0".equals(originalinfo.getV_type())) {
-									requestObj.put("ordertype", "10");// 10:D0,11:T1
-
-								} else if ("1".equals(originalinfo.getV_type())) {
-									requestObj.put("ordertype", "11");// 10:D0,11:T1
-								}
-								requestObj.put("cvn2", originalinfo.getV_cvn2() == null ? "" : originalinfo.getV_cvn2());
-								requestObj.put("expdate",
-										originalinfo.getV_expired() == null ? "" : originalinfo.getV_expired());
-								requestObj.put("usertel", originalinfo.getV_phone());
-								requestObj.put("backurl", HMUtil.quickUrl);
-								requestObj.put("returnurl", "");
-								String encryptdata = AesEncryption.Encrypt(requestObj.toJSONString(), HMUtil.aeskey,
-										HMUtil.aeskey);
-
-								String timestamp = TimeUtil.getTime();
-								signstr = SHA256Util.sha256(pmsBusinessPos.getKek() + "M" + pmsBusinessPos.getBusinessnum()
-										+ encryptdata + timestamp + pmsBusinessPos.getKek());
-								System.out.println(signstr);
-								JSONObject jsonObject = new JSONObject();
-								jsonObject.put("merchantid", "M" + pmsBusinessPos.getBusinessnum());
-								jsonObject.put("data", encryptdata);
-								jsonObject.put("timestamp", timestamp);
-								jsonObject.put("sign", signstr);
-								String postdata = "merchantid=" + "M" + pmsBusinessPos.getBusinessnum() + "&data="
-										+ encryptdata + "&timestamp=" + timestamp + "&sign=" + signstr;
-								String openApiUrl = "";
-								if (!"".equals(originalinfo.getV_cvn2())) {
-									openApiUrl = HMUtil.quickPayXinUrl;
-								} else {
-									openApiUrl = HMUtil.quickPayJieUrl;
-								}
-								String results = HttpsUtil.doSslPost(openApiUrl, postdata, "utf-8");
-								logger.info("恒明返回参数：" + results);
-
-								JSONObject responseObj = JSONObject.parseObject(results);
-								logger.info("message:" + responseObj.get("message"));
-								retMap.put("v_mid", originalinfo.getV_mid());
-								retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-								retMap.put("v_time", originalinfo.getV_time());
-								retMap.put("v_oid", originalinfo.getV_oid());
-								if ("0".equals(responseObj.get("ret").toString())) {
-									String dedata = AesEncryption.Desencrypt(responseObj.get("data").toString(),
-											HMUtil.aeskey, HMUtil.aeskey);
-									logger.info("恒明解析参数：" + dedata);
-									JSONObject jsonObject2 = JSONObject.parseObject(dedata);
-									// PmsAppTransInfo pmsAppTransInfo =
-									// pmsAppTransInfoDao.searchOrderInfo(pospTransInfo.getOrderId());
-									if ("0".equals(jsonObject2.get("orderstate"))) {
-										OriginalOrderInfo info = new OriginalOrderInfo();
-										info.setMerchantOrderId(jsonObject2.getString("payorderno"));
-										info.setOrderId(originalinfo.getV_oid());
-										number = originalDao.update(info);
-										retMap.put("v_code", "00");
-										retMap.put("v_msg", "请求成功");
-
-									} else {
-										retMap.put("v_code", "15");
-										retMap.put("v_msg", "请求失败");
-										return retMap;
-
-									}
-								} else {
-									retMap.put("v_code", "15");
-									retMap.put("v_msg", "请求失败");
-									return retMap;
-								}
-								break;
-
-							case "SYYS":// 沈阳银盛
-								PmsWeixinMerchartInfo weixin = new PmsWeixinMerchartInfo();
-
-								weixin.setCardNo(originalinfo.getV_settleCardNo());
-								weixin.setRealName(originalinfo.getV_settleName());
-								weixin.setCertNo(originalinfo.getV_cert_no());
-								weixin.setMobile(originalinfo.getV_phone());
-
-								PmsWeixinMerchartInfo model = weixinService.selectByCardEntity(weixin);
-
-								logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(model));
-
-								if (model == null) {
-									Map<String, String> requestMap = new HashMap<String, String>();
-									requestMap.put("merchId", "m1803070001"); // 商户全称，企业商户填写营业执照名称
-									requestMap.put("merchantName", originalinfo.getV_productDesc()); // 商户全称，企业商户填写营业执照名称
-									requestMap.put("channel", "WLB");
-									requestMap.put("installProvince", bank.getBank_province());
-									requestMap.put("installCity", bank.getBank_city());
-									requestMap.put("installCounty", bank.getBank_city());
-									requestMap.put("operateAddress", bank.getBank_city());
-									requestMap.put("legalPersonName", originalinfo.getV_settleName()); // 法人姓名，如果bankType为TOPRIVATE，则结算账户与法人必须一致,
-									// 如果bankType为TOPUBLIC，结算账户名和商户名称是一致的
-									requestMap.put("legalPersonID", originalinfo.getV_cert_no()); // 法人身份证
-									requestMap.put("merchantPersonPhone", originalinfo.getV_phone());// 商户联系人电话
-									// 如果bankType为TOPRIVATE，则legalPersonName与accountName必须一致
-									requestMap.put("accountNo", originalinfo.getV_settleCardNo());
-									requestMap.put("bankBranch", bank.getBank_name());
-									requestMap.put("bankProv", bank.getBank_province());
-									requestMap.put("bankCity", bank.getBank_city());
-									requestMap.put("bankCode", originalinfo.getV_settlePmsBankNo());
-									requestMap.put("bankName", bank.getBank_short_title());
-									requestMap.put("fastRate", originalinfo.getV_userFee());
-									String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
-									// 得到带签名数据
-									Map<String, ?> filterMap = PayCore.paraFilter(requestMap);
-
-									String linkStr = PayCore.createLinkString(filterMap);
-									logger.info("签名公钥" + key);
-									logger.info("待签数据" + linkStr);
-									String hexSign = "";
-									try {
-										hexSign = PayCore.md5Sign(linkStr, key);
-									} catch (Exception e) {
-										e.printStackTrace();
-									}
-									logger.info("签名数据:" + hexSign);
-									requestMap.put("sign_info", hexSign);
-									String requestStr = JSON.toJSONString(requestMap);
-									url = "http://pay.unvpay.com/services/ysFast/addInfo";
-									String respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
-									logger.info("返回值：" + respStr);
-									json = JSONObject.parseObject(respStr);
-									if ("0000".equals(json.getString("ret_code"))) {
-										String app_id = json.getString("app_id");
-										logger.info("上游返回的app_id：" + app_id);
-										Map<String, String> requestMap1 = new HashMap<String, String>();
-
-										requestMap1.put("merchId", "m1803070001"); // 支付系统分配给商户的机构号
-										requestMap1.put("appId", app_id); // 商户号
-										requestMap1.put("fastRate", originalinfo.getV_userFee());
-										requestMap1.put("channel", "WLB");
-										// 加密签名
-										Map<String, ?> filterMap1 = null;
-										try {
-											filterMap1 = PayCore.paraFilter(requestMap1);
-										} catch (Exception e1) {
-											// TODO Auto-generated catch block
-											e1.printStackTrace();
-										}
-										String linkStr1 = PayCore.createLinkString(filterMap1);
-										logger.info("签名公钥" + key);
-										logger.info("待签数据" + linkStr1);
-										String hexSign1 = "";
-										try {
-											hexSign1 = PayCore.md5Sign(linkStr1, key);
-										} catch (Exception e) {
-											e.printStackTrace();
-										}
-										logger.info("签名数据:" + hexSign1);
-										requestMap1.put("sign_info", hexSign1);
-										String requestStr1 = JSON.toJSONString(requestMap1);
-
-										url = "http://pay.unvpay.com/services/ysFast/addRate";
-										String respStr1 = HttpClientUtil.post(url, "UTF-8", requestStr1);
-										logger.info("返回值：" + respStr1);
-										json = JSONObject.parseObject(respStr1);
-										if ("0000".equals(json.getString("ret_code"))) {
-											app_id = json.getString("app_id");
-											logger.info("上游返回的app_id：" + app_id);
-											PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
-											merchartInfo.setAccount(app_id);// 账号
-											merchartInfo.setMerchartId(originalinfo.getV_mid());
-											merchartInfo.setMerchartName(merchantList.get(0).getMercName());
-											merchartInfo.setMerchartNameSort(merchantList.get(0).getShortname());
-											merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
-											merchartInfo.setCardNo(originalinfo.getV_settleCardNo());// 卡号
-											merchartInfo.setRealName(originalinfo.getV_settleName());// 姓名
-											merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
-											// merchartInfo.setAccountType(payRequest.getBusinessType());//账户类型
-											merchartInfo.setBankName(bank.getBank_name());// 开户行
-											merchartInfo.setPmsBankNo(originalinfo.getV_settlePmsBankNo());// 联行号
-											merchartInfo.setProvince(bank.getBank_province());// 省份
-											merchartInfo.setCity(bank.getBank_city());// 城市
-											merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
-											// merchartInfo.setWithdrawDepositSingleFee(payRequest.getWithdrawDepositSingleFee());//提现单笔手续费
-											merchartInfo.setoAgentNo("100333");
-											merchartInfo.setRateCode(originalinfo.getV_mid());
-											int i = weixinService.updateRegister(merchartInfo);
-											if (i > 0) {
-												PmsWeixinMerchartInfo pm = new PmsWeixinMerchartInfo();
-
-												pm.setCardNo(originalinfo.getV_cardNo());
-												pm.setRealName(originalinfo.getV_realName());
-												pm.setCertNo(originalinfo.getV_cert_no());
-												pm.setMobile(originalinfo.getV_phone());
-
-												PmsWeixinMerchartInfo pwm = weixinService.selectByCardEntity(pm);
-
-												logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(pwm));
-												if (pwm == null) {
-													Map<String, String> requestMap2 = new HashMap<String, String>();
-													requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
-													requestMap2.put("app_id", app_id); // appId
-													requestMap2.put("account_no", originalinfo.getV_cardNo()); // 银行账号
-													requestMap2.put("mobile", originalinfo.getV_phone()); // 银行预留电话，不填则使用进件电话
-													if ("1".equals(originalinfo.getV_accountType())) {
-														requestMap2.put("card_type", "01"); // 卡类型
-													} else if ("2".equals(originalinfo.getV_accountType())) {
-														requestMap2.put("card_type", "02"); // 卡类型
-													}
-
-													String call_back_url = BaseUtil.url
-															+ "/quickPayAction/syysReturnUrl.action?order_num="
-															+ originalinfo.getV_oid();
-
-													requestMap2.put("call_back_url", call_back_url); // 跳转页面地址
-													requestMap2.put("notify_url",
-															BaseUtil.url + "/quickPayAction/syysNotifyUrl.action"); // 接收异步通知地址
-													requestMap2.put("open_type", "JF_OPEN"); // 开卡类型，为空，默认为UNION_PAY_OPEN
-													requestMap2.put("channel", "WLB"); // 渠道
-													requestMap2.put("version", "V2.1.1"); // 版本编号
-													requestMap2.put("charset", "UTF-8"); // 字符编码
-
-													// 得到带签名数据
-													filterMap = PayCore.paraFilter(requestMap2);
-
-													linkStr = PayCore.createLinkString(filterMap);
-													logger.info("签名公钥" + key);
-													logger.info("待签数据" + linkStr);
-													hexSign = "";
-													try {
-														hexSign = PayCore.md5Sign(linkStr, key);
-													} catch (Exception e) {
-														e.printStackTrace();
-													}
-													logger.info("签名数据:" + hexSign);
-													requestMap2.put("sign_type", "MD5"); // md5签名
-													requestMap2.put("sign_info", hexSign);
-													requestStr = JSON.toJSONString(requestMap2);
-													url = "http://pay.unvpay.com/services/fastpay/openCard";
-													respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
-													logger.info("返回值：" + respStr);
-													json = JSONObject.parseObject(respStr);
-													if ("0000".equals(json.get("ret_code"))) {
-														String param = json.getString("ret_data");
-														JSONObject jb = JSONObject.parseObject(param);
-														String auth_id = (String) jb.get("auth_id");
-														merchartInfo = new PmsWeixinMerchartInfo();
-														merchartInfo.setAccount(auth_id);// 账号
-														merchartInfo.setMerchartId(originalinfo.getV_mid());
-														merchartInfo.setMerchartName(merchantList.get(0).getMercName());
-														merchartInfo
-																.setMerchartNameSort(merchantList.get(0).getShortname());
-														merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
-														merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
-														merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
-														merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
-														merchartInfo.setBankName(bank.getBank_name());// 开户行
-														merchartInfo.setProvince(bank.getBank_province());// 省份
-														merchartInfo.setCity(bank.getBank_city());// 城市
-														merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
-														merchartInfo.setoAgentNo("100333");
-														merchartInfo.setRateCode(originalinfo.getV_mid());
-														i = weixinService.updateRegister(merchartInfo);
-														if (i > 0) {
-															OriginalOrderInfo oo = new OriginalOrderInfo();
-															oo.setByUser(app_id);
-															oo.setSumCode(auth_id);
-															oo.setOrderId(originalinfo.getV_oid());
-															num = originalDao.update(oo);
-															if (num > 0) {
-																url = (String) jb.get("qr_code");
-																logger.info("沈阳银盛返回的url:" + url);
-																retMap.put("url", url);
-																retMap.put("v_code", "00000");
-																retMap.put("v_msg", "请求成功");
-															} else {
-																logger.info("app_id修改失败!");
-															}
-														}
-
-													} else {
-
-														retMap.put("v_code", "15");
-														retMap.put("v_msg", "请求失败");
-														return retMap;
-													}
-												} else {
-													logger.info("沈阳银盛进件app_id:" + model.getAccount());
-													logger.info("沈阳银盛进件:auth_id" + pwm.getAccount());
-													Map<String, String> requestMap2 = new HashMap<String, String>();
-													requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
-													requestMap2.put("app_id", model.getAccount()); // appId
-													requestMap2.put("auth_id", pwm.getAccount()); // 银行账号
-													Double amount = Double.parseDouble(originalinfo.getV_txnAmt());
-													Integer number1 = amount.intValue();
-													requestMap2.put("amount", number1.toString());
-													requestMap2.put("encrypt", "T0"); // 卡类
-
-													key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
-													// 得到带签名数据
-													filterMap = PayCore.paraFilter(requestMap2);
-
-													linkStr = PayCore.createLinkString(filterMap);
-													logger.info("沈阳银盛签名公钥" + key);
-													logger.info("沈阳银盛待签数据" + linkStr);
-													hexSign = PayCore.md5Sign(linkStr, key);
-													logger.info("沈阳银盛签名数据:" + hexSign);
-													requestMap2.put("sign_type", "MD5"); // md5签名
-													requestMap2.put("sign_info", hexSign);
-													requestStr = JSON.toJSONString(requestMap2);
-
-													url = "http://pay.unvpay.com/services/fastpay/submitOrder";
-													respStr = xdt.quickpay.syys.HttpClientUtil.post(url, "UTF-8",
-															requestStr);
-
-													logger.info("沈阳银盛短信返回值：" + respStr);
-													json = com.alibaba.fastjson.JSONObject.parseObject(respStr);
-													if ("0000".equals(json.getString("ret_code"))) {
-
-														JSONObject jb = json.getJSONObject("ret_data");
-														String param = jb.getString("parmMap");
-														logger.info("沈阳银盛短信返回的ret_data：" + param);
-														JSONObject jb1 = JSONObject.parseObject(param);
-														String token = jb1.getString("token");
-														logger.info("沈阳银盛短信返回的token：" + token);
-														OriginalOrderInfo oo = new OriginalOrderInfo();
-														oo.setOrderId(originalinfo.getV_oid());
-														oo.setSumCode(token);
-														oo.setByUser(model.getAccount());
-														;
-														oo.setProcdutNum("0000");
-														num = originalDao.update(oo);
-														if (num > 0) {
-															retMap.put("v_mid", originalinfo.getV_mid());
-															retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-															retMap.put("v_time", originalinfo.getV_time());
-															retMap.put("v_code", "00");
-															retMap.put("v_msg", "请求成功");
-															retMap.put("v_oid", originalinfo.getV_oid());
-														}
-													}
-
-												}
-
-											}
-
-										} else {
-											retMap.put("v_code", "15");
-											retMap.put("v_msg", "请求失败");
-											return retMap;
-										}
-
-									} else {
-
-										retMap.put("v_code", "15");
-										retMap.put("v_msg", "请求失败");
-										return retMap;
-									}
-
-								} else {
-									logger.info("沈阳银盛进件app_id:" + model.getAccount());
-									PmsWeixinMerchartInfo pm = new PmsWeixinMerchartInfo();
-
-									pm.setCardNo(originalinfo.getV_cardNo());
-									pm.setRealName(originalinfo.getV_realName());
-									pm.setCertNo(originalinfo.getV_cert_no());
-									pm.setMobile(originalinfo.getV_phone());
-
-									PmsWeixinMerchartInfo pwm = weixinService.selectByCardEntity(pm);
-
-									logger.info("沈阳银盛进件订单数据:" + JSON.toJSON(pwm));
-									if (pwm == null) {
-
-										String app_id = model.getAccount().replaceAll(" ", "");
-										Map<String, String> requestMap2 = new HashMap<String, String>();
-
-										requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
-										requestMap2.put("app_id", app_id); // appId
-										requestMap2.put("account_no", originalinfo.getV_cardNo()); // 银行账号
-										requestMap2.put("mobile", originalinfo.getV_phone()); // 银行预留电话，不填则使用进件电话
-										if ("1".equals(originalinfo.getV_accountType())) {
-											requestMap2.put("card_type", "01"); // 卡类型
-										} else if ("2".equals(originalinfo.getV_accountType())) {
-											requestMap2.put("card_type", "02"); // 卡类型
-										}
-
-										String call_back_url = BaseUtil.url
-												+ "/quickPayAction/syysReturnUrl.action?order_num="
-												+ originalinfo.getV_oid();
-
-										requestMap2.put("call_back_url", call_back_url); // 跳转页面地址
-										requestMap2.put("notify_url",
-												BaseUtil.url + "/quickPayAction/syysNotifyUrl.action"); // 接收异步通知地址
-										requestMap2.put("open_type", "JF_OPEN"); // 开卡类型，为空，默认为UNION_PAY_OPEN
-										requestMap2.put("channel", "WLB"); // 渠道
-										requestMap2.put("version", "V2.1.1"); // 版本编号
-										requestMap2.put("charset", "UTF-8"); // 字符编码
-										String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
-										// 得到带签名数据
-										Map<String, ?> filterMap = PayCore.paraFilter(requestMap2);
-
-										String linkStr = PayCore.createLinkString(filterMap);
-										logger.info("签名公钥" + key);
-										logger.info("待签数据" + linkStr);
-										String hexSign = "";
-										try {
-											hexSign = PayCore.md5Sign(linkStr, key);
-										} catch (Exception e) {
-											e.printStackTrace();
-										}
-										logger.info("签名数据:" + hexSign);
-										requestMap2.put("sign_type", "MD5"); // md5签名
-										requestMap2.put("sign_info", hexSign);
-										String requestStr = JSON.toJSONString(requestMap2);
-										url = "http://pay.unvpay.com/services/fastpay/openCard";
-										String respStr = HttpClientUtil.post(url, "UTF-8", requestStr);
-										logger.info("返回值：" + respStr);
-										json = JSONObject.parseObject(respStr);
-										if ("0000".equals(json.get("ret_code"))) {
-											String param = json.getString("ret_data");
-											JSONObject jb = JSONObject.parseObject(param);
-											String auth_id = (String) jb.get("auth_id");
-											PmsWeixinMerchartInfo merchartInfo = new PmsWeixinMerchartInfo();
-											merchartInfo.setAccount(auth_id);// 账号
-											merchartInfo.setMerchartId(originalinfo.getV_mid());
-											merchartInfo.setMerchartName(merchantList.get(0).getMercName());
-											merchartInfo.setMerchartNameSort(merchantList.get(0).getShortname());
-											merchartInfo.setCertNo(originalinfo.getV_cert_no());// 证件号
-											merchartInfo.setCardNo(originalinfo.getV_cardNo());// 卡号
-											merchartInfo.setRealName(originalinfo.getV_realName());// 姓名
-											merchartInfo.setMobile(originalinfo.getV_phone());// 手机号
-											merchartInfo.setBankName(bank.getBank_name());// 开户行
-											merchartInfo.setProvince(bank.getBank_province());// 省份
-											merchartInfo.setCity(bank.getBank_city());// 城市
-											merchartInfo.setDebitRate(originalinfo.getV_userFee());// 借记卡费率
-											merchartInfo.setoAgentNo("100333");
-											merchartInfo.setRateCode(originalinfo.getV_mid());
-											int i = weixinService.updateRegister(merchartInfo);
-											if (i > 0) {
-												OriginalOrderInfo oo = new OriginalOrderInfo();
-												oo.setByUser(app_id);
-												oo.setSumCode(auth_id);
-												oo.setOrderId(originalinfo.getV_oid());
-												num = originalDao.update(oo);
-												if (num > 0) {
-													url = (String) jb.get("qr_code");
-													logger.info("沈阳银盛返回的url:" + url);
-													retMap.put("url", url);
-													retMap.put("v_code", "00000");
-													retMap.put("v_msg", "请求成功");
-												} else {
-													logger.info("app_id修改失败!");
-												}
-											}
-
-										} else {
-
-											retMap.put("v_code", "15");
-											retMap.put("v_msg", "请求失败");
-											return retMap;
-										}
-
-									} else {
-										logger.info("沈阳银盛进件app_id:" + model.getAccount());
-										logger.info("沈阳银盛进件:auth_id" + pwm.getAccount());
-										Map<String, String> requestMap2 = new HashMap<String, String>();
-										requestMap2.put("order_num", originalinfo.getV_oid()); // 流水号
-										requestMap2.put("app_id", model.getAccount()); // appId
-										requestMap2.put("auth_id", pwm.getAccount()); // 银行账号
-										Double amount = Double.parseDouble(originalinfo.getV_txnAmt());
-										Integer number1 = amount.intValue();
-										requestMap2.put("amount", number1.toString());
-										requestMap2.put("encrypt", "T0"); // 卡类
-
-										String key = "0295a406899f4c3783ef4e22eef5ae9f";// md5key
-										// 得到带签名数据
-										Map<String, ?> filterMap = PayCore.paraFilter(requestMap2);
-
-										String linkStr = PayCore.createLinkString(filterMap);
-										logger.info("沈阳银盛签名公钥" + key);
-										logger.info("沈阳银盛待签数据" + linkStr);
-										String hexSign = PayCore.md5Sign(linkStr, key);
-										logger.info("沈阳银盛签名数据:" + hexSign);
-										requestMap2.put("sign_type", "MD5"); // md5签名
-										requestMap2.put("sign_info", hexSign);
-										String requestStr = JSON.toJSONString(requestMap2);
-
-										url = "http://pay.unvpay.com/services/fastpay/submitOrder";
-										String respStr = xdt.quickpay.syys.HttpClientUtil.post(url, "UTF-8", requestStr);
-
-										logger.info("沈阳银盛短信返回值：" + respStr);
-										json = com.alibaba.fastjson.JSONObject.parseObject(respStr);
-										if ("0000".equals(json.getString("ret_code"))) {
-
-											JSONObject jb = json.getJSONObject("ret_data");
-											String param = jb.getString("parmMap");
-											logger.info("沈阳银盛短信返回的ret_data：" + param);
-											JSONObject jb1 = JSONObject.parseObject(param);
-											String token = jb1.getString("token");
-											logger.info("沈阳银盛短信返回的token：" + token);
-											OriginalOrderInfo oo = new OriginalOrderInfo();
-											oo.setOrderId(originalinfo.getV_oid());
-											oo.setSumCode(token);
-											oo.setByUser(model.getAccount());
-											;
-											oo.setProcdutNum("0000");
-											num = originalDao.update(oo);
-											if (num > 0) {
-												retMap.put("v_mid", originalinfo.getV_mid());
-												retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-												retMap.put("v_time", originalinfo.getV_time());
-												retMap.put("v_code", "00");
-												retMap.put("v_msg", "请求成功");
-												retMap.put("v_oid", originalinfo.getV_oid());
-											}
-										}
-
-									}
-
-								}
-								break;
-							case "HJZF":// 汇聚快捷获取短信验证码
-								Map<String, String> result = new HashMap<>();
-								StringBuilder strs = new StringBuilder();
-								strs.append(HJUtil.Version2);
-								strs.append(pmsBusinessPos.getBusinessnum());// pmsBusinessPos.getBusinessnum()
-								strs.append(originalinfo.getV_productDesc());
-								strs.append(originalinfo.getV_oid());
-								strs.append(originalinfo.getV_txnAmt());
-								strs.append("1");
-								strs.append("FAST");
-								strs.append(originalinfo.getV_realName());
-								strs.append("1");
-								strs.append(originalinfo.getV_cert_no());
-								strs.append(originalinfo.getV_cardNo());
-								strs.append(originalinfo.getV_expired() == null ? "" : originalinfo.getV_expired());// YYYY-MM
-								strs.append(originalinfo.getV_cvn2() == null ? "" : originalinfo.getV_cvn2());
-								strs.append(originalinfo.getV_phone());
-								// strs.append(originalinfo.getV_attach() == null ? "" :
-								// originalinfo.getV_attach());
-								logger.info("汇聚待签名数据:" + strs.toString());
-								// String hmac =MD5Utils.sign(str.toString(), HJUtil.privateKey,
-								// "UTF-8");//RSAUtils.sign(str.toString().getBytes("UTF-8"),
-								// HJUtil.privateKey);
-								String hmac = DigestUtils.md5Hex(strs.toString() + pmsBusinessPos.getKek());// pmsBusinessPos.getKek()
-								result.put("p0_Version", HJUtil.Version2);
-								result.put("p1_MerchantNo", pmsBusinessPos.getBusinessnum());
-								result.put("p2_MerchantName", URLEncoder.encode(originalinfo.getV_productDesc(), "utf-8"));
-								result.put("q1_OrderNo", originalinfo.getV_oid());
-								result.put("q2_Amount", originalinfo.getV_txnAmt());
-								result.put("q3_Cur", "1");
-								result.put("q8_FrpCode", "FAST");
-								result.put("s1_PayerName", URLEncoder.encode(originalinfo.getV_realName(), "utf-8"));
-								result.put("s2_PayerCardType", "1");
-								result.put("s3_PayerCardNo", originalinfo.getV_cert_no());
-								result.put("s4_PayerBankCardNo", originalinfo.getV_cardNo());
-								if (originalinfo.getV_expired() != null && originalinfo.getV_expired() != "") {
-									result.put("s5_BankCardExpire", originalinfo.getV_expired());
-								}
-								if (originalinfo.getV_cvn2() != null && originalinfo.getV_cvn2() != "") {
-									result.put("s6_CVV2", originalinfo.getV_cvn2());
-								}
-								result.put("s7_BankMobile", originalinfo.getV_phone());
-								// if (originalinfo.getV_attach() != null && originalinfo.getV_attach() != "") {
-								// result.put("t1_ext", originalinfo.getV_attach());
-								// }
-								result.put("hmac", URLEncoder.encode(hmac, "utf-8"));
-								TreeMap<String, String> paramsMap = new TreeMap<>();
-								paramsMap.putAll(result);
-								String paramSrc = RequestUtils.getParamSrc(paramsMap);
-								logger.info("汇聚快捷支付给上游发送的数据:" + paramSrc);
-								// String retuString = RequestUtils.sendPost(HJUtil.scanCodePay,
-								// "hmac=ab00408505d7fa77077a760a3bb0cb47&p0_Version=2.0&p1_MerchantNo=888101700005315&p2_MerchantName=测试商品&q1_OrderNo=QP20180411143509323540&q2_Amount=1&q3_Cur=1&q8_FrpCode=FAST&s1_PayerName=李娟&s2_PayerCardType=1&s3_PayerCardNo=120105197510055420&s4_PayerBankCardNo=6228450028016697770&s7_BankMobile=13323358548"
-								// );
-								String retuString = PostUtils.doPost(HJUtil.quickPay, paramsMap);
-								// HttpService HT = new HttpService();
-								// String retuString = HT.POSTReturnString(HJUtil.quickPay, result,
-								// MBUtil.codeG);
-								logger.info("汇聚返回字符串参数：" + retuString);
-								net.sf.json.JSONObject jsons = net.sf.json.JSONObject.fromObject(retuString);
-								if ("100".equals(jsons.get("ra_Status"))) {
-									retMap.put("v_code", "00");
-									retMap.put("v_msg", jsons.getString("rb_Msg"));
-									retMap.put("v_oid", originalinfo.getV_oid());
-									retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-
-								} else {
-									retMap.put("v_code", "01");
-									retMap.put("v_msg", jsons.getString("rb_Msg"));
-								}
-								break;
-							case "JBB":// 聚佰宝快捷
-								weixin = new PmsWeixinMerchartInfo();
-
-								weixin.setCardNo(originalinfo.getV_settleCardNo());
-								weixin.setRealName(originalinfo.getV_settleName());
-								weixin.setCertNo(originalinfo.getV_cert_no());
-								weixin.setMobile(originalinfo.getV_phone());
-
-								model = weixinService.selectByCardEntity(weixin);
-
-								logger.info("聚佰宝快捷原订单数据:" + JSON.toJSON(model));
-
-								if (model.getAccount() == null) {
-									// 商户编号
-									String merchantId = "888201711290115";
-									// 业务代码
-									String bussId = "ONL0003";
-									String key = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC35dOgycZisH24maQMHKVF4B/UNcyJULOJKCS6PUPhiLZAdPgR6ulwoWTtmN8v58PX4TDculU88aFz9CSlpfA72r0bHhhzDJdBP2Ki2Rc/RHwu6vrF9tbv0EPL7db/ECZe7CPZykLn/5JRlVpbsQWsx7gqQaiOY2nw4U6Lo13UoQIDAQAB";
-									RSAPublicKey publicKey = RSAEncrypt.loadPublicKeyByStr(key);
-									String certNo = originalinfo.getV_cert_no();
-									byte[] cipherData = RSAEncrypt.encrypt(publicKey, certNo.getBytes("UTF-8"));
-									// rsa 加密之后的卡号
-									String rsacertNo = xdt.quickpay.jbb.util.Base64.encode(cipherData);
-
-									// 订单信息
-									String merOrderNum = originalinfo.getV_oid();
-
-									// 前台回调
-									String frontUrl = BaseUtil.url + "/quickPayAction/jbbNotifyUrl.action";
-									// 签名数据
-									String txnString = "bussId=" + bussId + "&certNo=" + rsacertNo + "&frontUrl=" + frontUrl
-											+ "&merchantId=" + merchantId + "&merOrderNum=" + merOrderNum + "&";
-									logger.info("聚佰宝上送的数据加密字符串:" + txnString);
-									MD5 md = new MD5();
-									String signValue = md.getMD5ofStr(txnString + "675FC1ctf2Y6zVm3");
-
-									String txn = "bussId=" + bussId + "&certNo=" + URLEncoder.encode(rsacertNo, "utf-8")
-											+ "&frontUrl=" + frontUrl + "&merchantId=" + merchantId + "&merOrderNum="
-											+ merOrderNum + "&signValue=" + signValue;
-
-									logger.info("聚佰宝上送的数据:" + txn);
-
-									url = "https://cashier.etonepay.com/NetPay/quickPaySign.action?" + txn;
-
-									HttpURLConection http = new HttpURLConection();
-
-									HttpUtil h = new HttpUtil();
-
-									String resonpe = http.httpURLConnectionPOST(
-											"https://cashier.etonepay.com/NetPay/quickPaySign.action", txn);
-									logger.info("响应结果:" + resonpe);
-									net.sf.json.JSONObject ob = net.sf.json.JSONObject.fromObject(resonpe);
-									Iterator it = ob.keys();
-									String respCode = "";
-									String html = "";
-									while (it.hasNext()) {
-										key = (String) it.next();
-										if (key.equals("respCode")) {
-
-											respCode = ob.getString(key);
-
-											logger.info("聚佰宝签约响应状态码:" + respCode);
-
-										}
-										if (key.equals("html")) {
-
-											html = ob.getString(key);
-
-											logger.info("聚佰宝签约html:" + html);
-										}
-									}
-									if ("0000".equals(respCode)) {
-										retMap.put("v_code", "00000");
-										retMap.put("v_msg", "请求成功");
-										retMap.put("html", html);
-									}
-
-								} else {
-
-									logger.info("##################聚佰宝获取短信接口##########");
-									// 商户编号
-									String merchantId = "888201711290115";
-									// 业务代码
-									String bussId = "ONL0003";
-									Integer amount = (int) (Double.parseDouble(originalinfo.getV_txnAmt()) * 100);
-
-									String tranAmt = amount.toString();
-
-									String protocolNo = "";
-
-									// 订单信息
-									String merOrderNum = originalinfo.getV_oid();
-									// 签名数据
-									String txnString = "bussId=" + bussId + "&merchantId=" + merchantId + "&merOrderNum="
-											+ merOrderNum + "&protocolNo=" + protocolNo + "&tranAmt=" + tranAmt + "&";
-									logger.info("聚佰宝上送的数据加密字符串:" + txnString);
-									MD5 md = new MD5();
-									String signValue = md.getMD5ofStr(txnString + "675FC1ctf2Y6zVm3");
-
-									String txn = "bussId=" + bussId + "&merchantId=" + merchantId + "&merOrderNum="
-											+ merOrderNum + "&protocolNo=" + protocolNo + "&tranAmt=" + tranAmt.toString()
-											+ "&signValue=" + signValue;
-
-									logger.info("聚佰宝上送的数据:" + txn);
-
-									url = "https://cashier.etonepay.com/NetPay/quickPaySms.action?" + txn;
-
-									HttpURLConection http = new HttpURLConection();
-
-									HttpUtil h = new HttpUtil();
-
-									String resonpe = http.httpURLConnectionPOST(
-											"https://cashier.etonepay.com/NetPay/quickPaySms.action", txn);
-									logger.info("响应结果:" + resonpe);
-									net.sf.json.JSONObject ob = net.sf.json.JSONObject.fromObject(resonpe);
-									Iterator it = ob.keys();
-									String transId = "";
-
-									String respCode = "";
-									while (it.hasNext()) {
-										String key = (String) it.next();
-										if (key.equals("respCode")) {
-
-											respCode = ob.getString(key);
-
-											logger.info("聚佰宝签约响应状态码:" + respCode);
-
-										}
-										if (key.equals("merOrderNum")) {
-
-											merOrderNum = ob.getString(key);
-
-											logger.info("聚佰宝签约html:" + merOrderNum);
-										}
-										if (key.equals("transId")) {
-
-											transId = ob.getString(key);
-
-											logger.info("聚佰宝签约transId:" + transId);
-										}
-									}
-									if ("0000".equals(respCode)) {
-										OriginalOrderInfo info = new OriginalOrderInfo();
-										info.setOrderId(merOrderNum);
-										info.setByUser(transId);// 商户号
-										info.setBankId(protocolNo);
-										number = originalDao.update(info);
-										if (number > 0) {
-											retMap.put("v_oid", originalinfo.getV_oid());
-											retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-											retMap.put("v_code", "00");
-											retMap.put("v_msg", "请求成功");
-											retMap.put("v_time", originalinfo.getV_time());
-											retMap.put("v_mid", originalinfo.getV_mid());
-										}
-									}
-
-								}
-
-								break;
-							case "YFWG":// 裕福快捷
-								DecimalFormat df1 = new DecimalFormat("######0"); // 四色五入转换成整数
-								if (originalinfo.getV_userId() == null || "".equals(originalinfo.getV_userId())) {
-									retMap.put("v_code", "01");
-									retMap.put("v_msg", "v_userId is null");
-									return retMap;
-								}
-								final String merCertPath = new File(this.getClass().getResource("/").getPath())
-										.getParentFile().getParentFile().getCanonicalPath() + "//ky//"
-										+ pmsBusinessPos.getBusinessnum() + ".cer";
-								final String pfxPath = new File(this.getClass().getResource("/").getPath()).getParentFile()
-										.getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum()
-										+ ".pfx";
-								final String pfxPwd = pmsBusinessPos.getKek();
-								QuickReq req = new QuickReq();
-								YufuCipher cipher = null;
-								YufuCipherSupport instance = null;
-								cipher = YufuCipherSupport.getCipherInstance(merCertPath, pfxPath, pfxPwd, cipher,
-										instance);
-								// YufuCipher cipher = YufuCipherSupport.getCipherInstance(merCertPath, pfxPath,
-								// pfxPwd);
-								try {
-									List<Map<String, String>> list = new ArrayList<>();
-									Map<String, String> reqMaps = new HashMap<>();
-									req.setVersion("1.0.0");
-									req.setMerchantId(pmsBusinessPos.getBusinessnum());
-									req.setMerchantOrderId(originalinfo.getV_oid());
-									req.setMerchantOrderTime(originalinfo.getV_time());
-									BigDecimal payAmt = new BigDecimal(originalinfo.getV_txnAmt())
-											.setScale(2, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100));
-									req.setMerchantOrderAmt(df1.format(payAmt));
-									// req.setMerchantDisctAmt(merchantDisctAmt);
-									req.setMerchantOrderCurrency("156");
-									req.setGwType("04");
-									req.setBackUrl(YFUtil.notifyUrl);
-									// req.setUserType("01");
-									req.setMerchantUserId(originalinfo.getV_userId());
-
-									// {cardInfoList=, respDesc=调用接口成功, merchantId=000001220100000470,
-									// merchantUserId=1523167250194, version=1.0.0, respCode=0000}
-									req.setMerchantSettleInfo("[{\"merchantId\":\"" + pmsBusinessPos.getBusinessnum()
-											+ "\",\"merchantName\":\"" + originalinfo.getV_productDesc()
-											+ "\",\"orderAmt\":\"" + df1.format(payAmt) + "\"," + "\"sumGoodsName \":\""
-											+ originalinfo.getV_productDesc() + "\"}]");
-
-									req.setMerchantOrderDesc(originalinfo.getV_productDesc());
-
-									// req.setMerchantSettleInfo("[{\"merchantId\":\"000001110100000812\",\"merchantName\":\"商户00000111050000001\",\"orderAmt\":100,\"sumGoodsName\":\"我是00000111050000001的商品，哈哈哈\"}]");
-									req.setMsgExt(originalinfo.getV_attach());
-									// req.setMisc("");
-
-									if ("".equals(originalinfo.getV_verifyId()) || originalinfo.getV_verifyId() == null) {
-										if ("".equals(originalinfo.getV_cardNo()) || originalinfo.getV_cardNo() == null) {
-											retMap.put("v_code", "01");
-											retMap.put("v_msg", "v_cardNo is null");
-											return retMap;
-										} else {
-											reqMaps.put("cardNo", originalinfo.getV_cardNo());// originalinfo.getV_cardNo()
-										}
-										if ("1".equals(originalinfo.getV_accountType())) {
-											reqMaps.put("cardType", "P1");
-										} else if ("2".equals(originalinfo.getV_accountType())) {
-											retMap.put("v_code", "01");
-											retMap.put("v_msg", "此商户不支持贷记卡");
-											return retMap;
-											// reqMaps.put("cardType", "P2");
-										} else {
-											retMap.put("v_code", "01");
-											retMap.put("v_msg", "v_accountType is null");
-											return retMap;
-										}
-										if (!"".equals(originalinfo.getV_realName())
-												&& originalinfo.getV_realName() != null) {
-											reqMaps.put("name", originalinfo.getV_realName());
-										} else {
-											retMap.put("v_code", "01");
-											retMap.put("v_msg", "v_realName is null");
-											return retMap;
-										}
-										if (bank2 != null) {
-											reqMaps.put("bankNo", bank2.getBank_code());
-										} else {
-											reqMaps.put("bankNo", "");
-										}
-										if (!"".equals(originalinfo.getV_cert_no())
-												&& originalinfo.getV_cert_no() != null) {
-											reqMaps.put("certNo", originalinfo.getV_cert_no());
-										} else {
-											retMap.put("v_code", "01");
-											retMap.put("v_msg", "v_cert_no is null");
-											return retMap;
-										}
-										reqMaps.put("certType", "01");
-										reqMaps.put("phone", originalinfo.getV_phone());
-										reqMaps.put("cvn2",
-												originalinfo.getV_cvn2() == null ? "" : originalinfo.getV_cvn2());
-										reqMaps.put("expired",
-												originalinfo.getV_expired() == null ? "" : originalinfo.getV_expired());
-										req.setPayCardList("[{\"cardNo\":\"" + reqMaps.get("cardNo") + "\",\"cardType\":\""
-												+ reqMaps.get("cardType") + "\",\"bankNo\":\"" + reqMaps.get("bankNo")
-												+ "\",\"certNo\":\"" + reqMaps.get("certNo")
-												+ "\",\"certType\":\"01\",\"name\":\"" + reqMaps.get("name")
-												+ "\",\"phone\":\"" + reqMaps.get("phone") + "\",\"cvn2\":\""
-												+ reqMaps.get("cvn2") + "\",\"expired\":\"" + reqMaps.get("expired")
-												+ "\"}]");
-									} else {
-										req.setVerifyId(originalinfo.getV_verifyId());
-									}
-
-									// req.setPayCardList("[{\"cardNo\":\""+originalinfo.getV_cardNo()+"\",\"cardType\":\"P1\",\"bankNo\":\"CDB\",\"certNo\":\""+originalinfo.getV_cert_no()+"\","
-									// +
-									// "\"certType\":\"01\",\"name\":\""+originalinfo.getV_realName()+"\",\"phone\":\""+originalinfo.getV_phone()+"\",\"cvn2\":\""+originalinfo.getV_cvn2()==null?"":originalinfo.getV_cvn2()+"\",\"expired\":\""+originalinfo.getV_expired()==null?"":originalinfo.getV_expired()+"\"}]");
-									//
-									// req.setPayCardList(JSONObject.toJSONString(list));
-
-									String data = GsonUtil.objToJson(req);
-									logger.info("data:" + data);
-									Map<String, String> params = GsonUtil.jsonToObj(data, Map.class);
-									ParamPacket bo = cipher.doPack(params);
-									logger.info("11!:" + JSON.toJSON(bo));
-									TreeMap<String, String> map_param = new TreeMap<>();
-									map_param.put("merchantId", pmsBusinessPos.getBusinessnum());
-									map_param.put("data", URLEncoder.encode(bo.getData(), "utf-8"));
-									map_param.put("enc", URLEncoder.encode(bo.getEnc(), "utf-8"));
-									map_param.put("sign", URLEncoder.encode(bo.getSign(), "utf-8"));
-									String urlPay = "";
-									if ("000001110100000812".equals(pmsBusinessPos.getBusinessnum())) {
-										urlPay = "http://malltest.yfpayment.com/payment/service/payset.do";
-									} else {
-										urlPay = "http://www.yfpayment.com/payment/service/payset.do";
-									}
-									String returnStr = PostUtils.doPost(urlPay, map_param);
-
-									if (returnStr != null && !"".equals(returnStr)) {
-										// 二、验签解密
-										returnStr = URLDecoder.decode(returnStr, "utf-8");
-										System.out.println("URL解码后的置单应答结果：" + returnStr);
-										TreeMap<String, String> boMap = JSON.parseObject(returnStr,
-												new TypeReference<TreeMap<String, String>>() {
-												});
-										Map<String, String> payshowParams = cipher.unPack(
-												new ParamPacket(boMap.get("data"), boMap.get("enc"), boMap.get("sign")));
-										System.out.println("解密后的置单应答结果：" + payshowParams);
-										if ("0000".equals(payshowParams.get("respCode"))) {
-											OriginalOrderInfo oo = new OriginalOrderInfo();
-											oo.setOrderId(originalinfo.getV_oid());
-											oo.setSumCode(payshowParams.get("token"));
-											oo.setProcdutNum("0000");
-											num = originalDao.update(oo);
-											if (num > 0) {
-												retMap.put("v_code", "00");
-												retMap.put("v_msg", payshowParams.get("respDesc"));
-												retMap.put("v_attach", payshowParams.get("msgExt"));
-												retMap.put("v_oid", originalinfo.getV_oid());
-												retMap.put("v_mid", originalinfo.getV_mid());
-											} else {
-												logger.info("app_id修改失败!");
-												retMap.put("v_code", "01");
-												retMap.put("v_msg", "系统错误,预下单失败");
-											}
-										} else {
-											retMap.put("v_code", "01");
-											retMap.put("v_msg", payshowParams.get("respDesc"));
-										}
-
-									} else {
-										System.out.println("置单返回报文为空！");
-									}
-								} catch (Exception e) {
-									e.printStackTrace();
-								}
-								break;
-							case "GYY":// 柜银云快捷
-								Map<String, Object> infoMap = new HashMap<String, Object>();
-								infoMap.put("agentNo", "10033");// 机构号
-								infoMap.put("merName", originalinfo.getV_productDesc());// 商户名称
-								infoMap.put("merAddr", originalinfo.getV_attach());// 商户地址
-								infoMap.put("settleName", originalinfo.getV_realName());// 结算姓名
-								infoMap.put("settlePhone", originalinfo.getV_phone());// 手机号
-								infoMap.put("settleBank", bank.getBank_short_title());// 开户银行
-								infoMap.put("settleBankNo", bank.getBank_code());// 银行简码
-								infoMap.put("settleAccount", originalinfo.getV_settleCardNo());// 结算卡号
-								infoMap.put("settleBankSub", bank.getBank_name());// 开户支行
-								infoMap.put("settleBankBranch", originalinfo.getV_settlePmsBankNo());// 联行号
-								infoMap.put("settleSubProvince", bank.getBank_province());// 开户省
-								infoMap.put("settleSubCity", bank.getBank_city());// 开户市
-
-								infoMap.put("settleIdCard", originalinfo.getV_cert_no());// 身份证号
-								String params = ApiUtil.sortMap(infoMap);
-								logger.info("柜银云商户入驻提交信息：" + params);
-								String reStr = ApiUtil.sendPost("http://139.224.27.56/ygww/sys/api/outer/addMer.do",
-										params);
-								logger.info("柜银云商户入驻返回结果：" + reStr);
-								Map reMap = ApiUtil.toMap(reStr);
-								String respCodes = reMap.get("respCode").toString();
-								logger.info("柜银云商户入驻状态码：" + respCodes);
-								String merKeys = "";
-								String merNo = "";
-								String checkFlag = "";
-								String expired = originalinfo.getV_expired();
-								char[] cc = expired.toCharArray();
-								StringBuffer bb = new StringBuffer();
-								bb.append(cc[2]);
-								bb.append(cc[3]);
-								bb.append(cc[0]);
-								bb.append(cc[1]);
-								logger.info("下游上传的信用卡有效期：" + bb);
-								if ("0000".equals(respCodes)) {
-									merKeys = reMap.get("merKey").toString();
-									logger.info("柜银云商户入驻返回商户密钥：" + merKeys);
-									merNo = reMap.get("merNo").toString();
-									logger.info("柜银云商户入驻返回商户号：" + merNo);
-
-									Map<String, Object> infoMaps = new HashMap<String, Object>();
-									infoMaps.put("agentNo", "10033");// 机构号
-									infoMaps.put("merNo", merNo);// 商户号
-									infoMaps.put("service", "ncldd0");// 通道
-									infoMaps.put("lservice", "checkName");// 接口
-									infoMaps.put("out_trade_no", ApiUtil.newDateMore());// 交易流水号
-									infoMaps.put("payRate", originalinfo.getV_userFee());// 交易流水号
-									infoMaps.put("settleFee", originalinfo.getV_settleUserFee());// 交易流水号
-									params = ApiUtil.sortMap(infoMaps);
-									sign = xdt.quickpay.gyy.util.MD5.getSign(infoMaps, merKeys);
-									params += "&sign=" + sign;
-									logger.info("柜银云开通快捷提交信息：" + params);
-									reStr = ApiUtil.sendPost("http://139.224.27.56/ygww/sys/api/outer/geteway.do", params);
-									logger.info("柜银云开通快捷返回结果：" + reStr);
-									reMap = ApiUtil.toMap(reStr);
-									respCodes = reMap.get("respCode").toString();
-									logger.info("柜银云商户入驻状态码：" + respCodes);
-									if ("0000".equals(respCodes)) {
-										Map<String, Object> infoMapss = new HashMap<String, Object>();
-										infoMapss.put("agentNo", "10033");// 机构号
-										infoMapss.put("merNo", merNo);// 商户号
-										infoMapss.put("service", "ncldd0");// 通道
-										infoMapss.put("lservice", "applyTrade");// 接口
-										infoMapss.put("accNo", originalinfo.getV_cardNo());// 交易卡
-										infoMapss.put("out_trade_no", originalinfo.getV_oid());// 交易流水
-										infoMapss.put("cvn2", originalinfo.getV_cvn2());// cvn2
-
-										infoMapss.put("useTime", bb);// 有效期
-										infoMapss.put("orderTime", originalinfo.getV_time());// 接口
-										infoMapss.put("amount", originalinfo.getV_txnAmt());// 交易金额，元
-
-										params = ApiUtil.sortMap(infoMapss);
-										sign = xdt.quickpay.gyy.util.MD5.getSign(infoMapss, merKeys);
-										params += "&sign=" + sign;
-										logger.info("柜银云开通快捷提交信息：" + params);
-										reStr = ApiUtil.sendPost("http://139.224.27.56/ygww/sys/api/outer/geteway.do",
-												params);
-										logger.info("柜银云开通快捷返回结果：" + reStr);
-										reMap = ApiUtil.toMap(reStr);
-										respCodes = reMap.get("respCode").toString();
-										logger.info("柜银云开通快捷状态码：" + respCodes);
-										if ("0000".equals(respCodes)) {
-											checkFlag = reMap.get("checkFlag").toString();
-											Map<String, Object> infoMapsss = new HashMap<String, Object>();
-											infoMapsss.put("agentNo", "10033");// 机构号
-											infoMapsss.put("merNo", merNo);// 商户号
-											infoMapsss.put("service", "ncldd0");// 通道
-											infoMapsss.put("lservice", "sendSMS");// 接口
-											infoMapsss.put("cvn2", originalinfo.getV_cvn2());// cvn2
-											infoMapsss.put("phone", originalinfo.getV_phone());// cvn2
-											infoMapsss.put("useTime", bb);// 有效期
-											infoMapsss.put("out_trade_no", originalinfo.getV_oid());// 交易流水
-											infoMapsss.put("orderTime", originalinfo.getV_time());// 交易时间
-											infoMapsss.put("checkFlag", checkFlag);// 交易标记
-
-											params = ApiUtil.sortMap(infoMapsss);
-											sign = xdt.quickpay.gyy.util.MD5.getSign(infoMapsss, merKeys);
-											params += "&sign=" + sign;
-											System.out.println("柜银云获取短信提交信息：" + params);
-											reStr = ApiUtil.sendPost("http://139.224.27.56/ygww/sys/api/outer/geteway.do",
-													params);
-											System.out.println("柜银云获取短信返回结果：" + reStr);
-											reMap = ApiUtil.toMap(reStr);
-											respCodes = reMap.get("respCode").toString();
-											logger.info("柜银云开通快捷状态码：" + respCodes);
-											if ("0000".equals(respCodes)) {
-												OriginalOrderInfo info = new OriginalOrderInfo();
-												info.setOrderId(originalinfo.getV_oid());
-												info.setByUser(merNo);// 商户号
-												info.setSumCode(merKeys);
-												info.setBankId(checkFlag);
-												number = originalDao.update(info);
-												if (number > 0) {
-													retMap.put("v_mid", originalinfo.getV_mid());
-													retMap.put("v_txnAmt", originalinfo.getV_txnAmt());
-													retMap.put("v_time", originalinfo.getV_time());
-													retMap.put("v_code", "00");
-													retMap.put("v_msg", "请求成功");
-													retMap.put("v_oid", originalinfo.getV_oid());
-												} else {
-													retMap.put("v_code", "15");
-													retMap.put("v_msg", "请求失败");
-												}
-											} else {
-												retMap.put("v_code", "15");
-												retMap.put("v_msg", "请求失败");
-											}
-										} else {
-											retMap.put("v_code", "15");
-											retMap.put("v_msg", "请求失败");
-										}
-
-									} else {
-										retMap.put("v_code", "15");
-										retMap.put("v_msg", "请求失败");
-									}
-
-								} else {
-									retMap.put("v_code", "15");
-									retMap.put("v_msg", "请求失败");
-								}
-
-								break;
-							case "SHYL":// 上海漪雷快捷
-								logger.info("###########上海漪雷快捷绑卡接口##########");
-								Map<String, Object> infos = new HashMap<String, Object>();
-								infos.put("tranType", "14000");// 机构号
-								infos.put("merName", originalinfo.getV_productDesc());// 商户名称
-								infos.put("merAddress", originalinfo.getV_productDesc());// 商户地址
-
-								// 对特殊字段进行公钥加密
-								PublicKey publicKey = RSAUtil.getPublicKey(PUBLIC_KEY);
-								Cipher ciphers = Cipher.getInstance("RSA");
-								ciphers.init(Cipher.ENCRYPT_MODE, publicKey);
-								// 姓名加密
-								String name = ciphers.doFinal(originalinfo.getV_realName().getBytes()).toString();
-								// 身份证加密
-								String idcard = ciphers.doFinal(originalinfo.getV_cert_no().getBytes()).toString();
-								// 借记卡加密
-								String bankCard = ciphers.doFinal(originalinfo.getV_settleCardNo().getBytes()).toString();
-								infos.put("name", name);// 结算姓名
-								infos.put("idcard", idcard);// 手机号
-								infos.put("bankCard", bankCard);// 开户银行
-								infos.put("bankName", bank.getBank_short_title());// 银行简码
-								infos.put("bankNo", "GSYH");// 结算卡号
-								// 手机号加密
-								String preMobile = ciphers.doFinal(originalinfo.getV_phone().getBytes()).toString();
-								infos.put("preMobile", preMobile);// 开户支行
-								infos.put("bankCode", originalinfo.getV_settlePmsBankNo());// 联行号
-								infos.put("branchBank", bank.getBank_name());// 开户省
-								infos.put("province", bank.getBank_province());// 开户市
-								infos.put("city", bank.getBank_city());// 身份证号
-								infos.put("tradeRate", Double.parseDouble(originalinfo.getV_userFee()) * 100 + "");// 身份证号
-								infos.put("drawFee", originalinfo.getV_settleUserFee());// 身份证号
-								infos.put("custNo", originalinfo.getV_userId());// 身份证号
-								String stris = RSAUtil.getSign(infos);
-								logger.info("上海漪雷快捷绑卡签名前的数据:" + stris);
-								// RSA私钥签名
-								String signature = RSAUtil.sign(stris.getBytes("UTF-8"), PRIVACE_KEY);
-
-								Map<String, String> mapstr = new HashMap<String, String>();
-
-								mapstr.put("version", "1.0.0");
-								mapstr.put("platformNos", "P20171012861761863371");
-								mapstr.put("channelNo", "C20180424609343188755");
-								mapstr.put("merNo", "M20180424611894665448");
-								mapstr.put("signature", signature);
-								logger.info("上海漪雷快捷绑卡上送的数据:" + HttpURLConection.parseParams(mapstr));
-								String resultcode = HttpURLConection.httpURLConnectionPOST(
-										"http://spapi.beichuanglangrun.com/trade/handle",
-										HttpURLConection.parseParams(mapstr));
-
-								logger.info("上海漪雷快捷绑卡响应的数据:" + resultcode);
-								logger.info("###########上海漪雷快捷获取短信验证码##########");
-								Map<String, Object> infoMaps = new HashMap<String, Object>();
-								infoMaps.put("tranType", "14000");// 机构号
-								infoMaps.put("orderAmount", originalinfo.getV_productDesc());// 商户名称
-								infoMaps.put("subject", originalinfo.getV_attach());// 商户地址
-								infoMaps.put("merOrderNo", "M20180413085019363857");// 结算姓名
-								infoMaps.put("orderNo", originalinfo.getV_phone());// 手机号
-								infoMaps.put("tradeRate", bank.getBank_short_title());// 开户银行
-								infoMaps.put("drawFee", bank.getBank_code());// 银行简码
-								infoMaps.put("payBankCard", originalinfo.getV_settleCardNo());// 结算卡号
-								infoMaps.put("payBankName", bank.getBank_name());// 开户支行
-								infoMaps.put("payPreMobile", originalinfo.getV_settlePmsBankNo());// 联行号
-								infoMaps.put("cvn2", bank.getBank_province());// 开户省
-								infoMaps.put("expired", bank.getBank_city());// 开户市
-								infoMaps.put("payBankCode", originalinfo.getV_cert_no());// 身份证号
-								infoMaps.put("name", originalinfo.getV_cert_no());// 身份证号
-								infoMaps.put("idcard", originalinfo.getV_cert_no());// 身份证号
-								infoMaps.put("bankCard", originalinfo.getV_cert_no());// 身份证号
-								infoMaps.put("bankName", originalinfo.getV_cert_no());// 身份证号
-								infoMaps.put("bankCode", originalinfo.getV_cert_no());// 身份证号
-								infoMaps.put("preMobile", originalinfo.getV_cert_no());// 身份证号
-								infoMaps.put("backUrl", originalinfo.getV_cert_no());// 身份证号
-								break;
-							default:
-								break;
-							}
-						}
-					}
-
 				}
-
-				
 			} else {
 				// 请求参数为空
 				logger.info("商户没有进行实名认证，" + merchantinfo.getMercId());
