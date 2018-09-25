@@ -63,5 +63,6 @@ public interface IPospRouteInfoDAO extends IBaseDao<PospRouteInfo> {
 	 * 添加
 	 */
 	public int insertPospRouteInfo(PospRouteInfo info);
-
+	
+	public int updateStatus(PospRouteInfo info);
 }

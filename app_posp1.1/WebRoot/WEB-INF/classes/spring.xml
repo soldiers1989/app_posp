@@ -96,5 +96,12 @@
 		cron="0/5 * * * * ? " />  
     	  	
 	</task:scheduled-tasks>   -->
+	<!-- 中信银行轮训重置路由定时任务 -->
+	<!--  <bean id="user7" class="xdt.aspect.PospRountTime" />
+	<task:scheduled-tasks>
+	<task:scheduled ref="user7" method="updateStatus"
+		cron="0 0 0 1/1 * ? " />  
+    	  	
+	</task:scheduled-tasks> -->
 	
 </beans>

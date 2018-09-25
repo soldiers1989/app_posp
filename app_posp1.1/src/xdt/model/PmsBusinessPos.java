@@ -1,5 +1,7 @@
 package xdt.model;
 
+import java.math.BigDecimal;
+
 /**
  * ********************************************************
  * 
@@ -33,9 +35,18 @@ public class PmsBusinessPos {
     private String merchantId;//通道商户的主键id
     private String outPay;//入金限制  0开启 1关闭
     private String goldPay;//出金限制  0开启 1关闭
+    private BigDecimal pospRouteId;//中间表PospRouteInfo的id
     
     
-    
+
+	public BigDecimal getPospRouteId() {
+		return pospRouteId;
+	}
+
+	public void setPospRouteId(BigDecimal pospRouteId) {
+		this.pospRouteId = pospRouteId;
+	}
+
 	public String getOutPay() {
 		return outPay;
 	}

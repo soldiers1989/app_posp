@@ -7,6 +7,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
 
 import org.apache.log4j.Logger;
 import org.dom4j.Attribute;
@@ -88,7 +89,27 @@ public class XMLUtil {
 			map.put(e.getName(), e.getText());
 		return map;
 	}
-	
+	/**
+	 * map转化xml
+	 * @param parameters
+	 * @return
+	 */
+	 public static String parseXML(Map parameters) {
+	        StringBuffer sb = new StringBuffer();
+	        sb.append("<xml>");
+	        Set es = parameters.entrySet();
+	        Iterator it = es.iterator();
+	        while (it.hasNext()) {
+	            Map.Entry entry = (Map.Entry)it.next();
+	            String k = (String)entry.getKey();
+	            String v = (String)entry.getValue();
+	            if (null != v && !"".equals(v) && !"appkey".equals(k)) {
+	                sb.append("<" + k + ">" + parameters.get(k) + "</" + k + ">\n");
+	            }
+	        }
+	        sb.append("</xml>");
+	        return sb.toString();
+	    }
 	
 	public static byte[] callMapToXML(Map map) {  
         logger.info("将Map转成Xml, Map：" + map.toString());  
@@ -99,7 +120,7 @@ public class XMLUtil {
         sb.append("</ROOT>");  
         logger.info("将Map转成Xml, Xml：" + sb.toString());  
         try {  
-            return sb.toString().getBytes("UTF-8");  
+            return sb.toString().getBytes("utf-8");  
         } catch (Exception e) {  
             logger.error(e);  
         }  

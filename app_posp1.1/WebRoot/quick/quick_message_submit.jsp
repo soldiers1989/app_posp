@@ -10,7 +10,7 @@ String basePath = request.getScheme()+"://"+request.getServerName()+":"+request.
 <title>商户订单数据(模拟)</title>
 </head>
 <body onload="sharingPay()">
-	<form id="pay_form" action="${pageContext.request.contextPath }/quickPayAction/message.action" method="post">
+	<form id="pay_form" action="../quickPayAction/message.action" method="post">
 	    <input type="hidden" name="v_version" value="${temp.v_version}"> <br>
 	    <input type="hidden" name="v_mid" value="${temp.v_mid}"><br>
 	    <input type="hidden" name="v_oid" value="${temp.v_oid}"><br>

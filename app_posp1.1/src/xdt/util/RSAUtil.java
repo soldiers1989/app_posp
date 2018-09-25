@@ -15,6 +15,8 @@ import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.Signature;
+import java.security.SignatureException;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.KeySpec;
 import java.security.spec.PKCS8EncodedKeySpec;
@@ -24,6 +26,9 @@ import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
+
+import org.apache.commons.codec.binary.Base64;
+
 
 import sun.misc.BASE64Decoder;
 import sun.misc.BASE64Encoder;
@@ -343,5 +348,34 @@ public class RSAUtil
         }
 
     }
-
+    
+    public static String rsa256Sign(String preStr,String mchPrivateKey) {
+    	Signature signature = null;
+    	String sign="";
+        try {
+            signature = Signature.getInstance("SHA256WithRSA");
+        } catch (Exception e) {
+            // 上线运行时套件一定存在
+            // 异常不往外抛
+        }
+        try {
+            PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(Base64.decodeBase64(mchPrivateKey));
+            PrivateKey privateKey = KeyFactory.getInstance("RSA").generatePrivate(keySpec);
+            signature.initSign(privateKey);
+        } catch(Exception e) {
+            //logger.warn("解析私钥失败：{}", e.getMessage());
+            throw new RuntimeException("INVALID_PRIKEY");
+        }
+        try {
+            signature.update(preStr.getBytes("UTF-8"));
+           
+            sign =new String(Base64.encodeBase64(signature.sign()), "UTF8");
+        } catch (Exception e) {
+            // 一般不会出现
+            
+            throw new RuntimeException(e.getMessage());
+        }
+    	return sign;
+    }
+   
 }

@@ -1,13 +1,17 @@
 package xdt.util;
 
+import java.io.ByteArrayInputStream;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 import org.dom4j.Document;
 import org.dom4j.DocumentException;
 import org.dom4j.DocumentHelper;
 import org.dom4j.Element;
+import org.dom4j.io.SAXReader;
+import org.xml.sax.InputSource;
 
 import com.alibaba.fastjson.JSON;
 
@@ -66,6 +70,27 @@ public class XmlToMap {
 		}
 		return map;
 	} 
+	
+	/**
+     * 转XMLmap
+     * @author  
+     * @param xmlBytes
+     * @param charset
+     * @return
+     * @throws Exception
+     */
+    public static Map<String, String> toMap(byte[] xmlBytes,String charset) throws Exception{
+    	 Map<String, String> params = new HashMap<>();
+        SAXReader reader = new SAXReader(false);
+        InputSource source = new InputSource(new ByteArrayInputStream(xmlBytes));
+        source.setEncoding(charset);
+        Document doc = reader.read(source);
+        List<Element> els = doc.getRootElement().elements();
+        for(Element el : els){
+        	params.put(el.getName().toLowerCase(), el.getTextTrim());
+        }
+        return params;
+    }
 	public static void main(String[] args) {
 		 String xmlString = "<html>" + "<head>" + "<title>dom4j解析一个例子</title>"
 	                + "<script>" + "<username>yangrong</username>"

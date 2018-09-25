@@ -3,6 +3,8 @@ package xdt.controller;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UnsupportedEncodingException;
+import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
@@ -18,7 +20,9 @@ import javax.servlet.ServletInputStream;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.commons.collections.set.SynchronizedSet;
 import org.apache.commons.lang.StringUtils;
+import org.apache.http.util.EntityUtils;
 import org.apache.log4j.Logger;
 import org.bouncycastle.crypto.agreement.srp.SRP6Server;
 import org.springframework.stereotype.Controller;
@@ -37,6 +41,7 @@ import xdt.dto.scanCode.entity.ScanCodeRequestEntity;
 import xdt.dto.scanCode.entity.ScanCodeResponseEntity;
 import xdt.model.ChannleMerchantConfigKey;
 import xdt.model.OriginalOrderInfo;
+import xdt.model.PospRouteInfo;
 import xdt.quickpay.hengfeng.util.Bean2QueryStrUtil;
 import xdt.quickpay.hengfeng.util.HttpClientUtil;
 import xdt.quickpay.nbs.common.util.SignatureUtil;
@@ -50,6 +55,7 @@ import xdt.service.JsdsQrCodeService;
 import xdt.util.BeanToMapUtil;
 import xdt.util.HttpURLConection;
 import xdt.util.JsdsUtil;
+import xdt.util.XmlToMap;
 import xdt.util.utils.MD5Utils;
 import xdt.util.utils.RequestUtils;
 import xdt.util.utils.UtilThread;
@@ -147,7 +153,8 @@ public class ScanCodeController extends BaseAction{
 			if("0000".equals(result.get("v_code"))) {
 				outString(response, result.get("v_result"));
 			}else {
-				
+
+				log.info(JSON.toJSONString(result));
 				outString(response, JSON.toJSONString(result));
 			}
 		} catch (IOException e) {
@@ -1450,7 +1457,7 @@ public class ScanCodeController extends BaseAction{
 			if("SUCCESS".equals(tradeStatus)) {
 				map.put("v_status", "0000");
 				map.put("v_status_msg", "支付成功");
-				GateWayQueryRequestEntity query =new GateWayQueryRequestEntity();
+				/*GateWayQueryRequestEntity query =new GateWayQueryRequestEntity();
 				query.setV_mid(originalInfo.getPid());
 				query.setV_oid(originalInfo.getOrderId());
 				Map<String,String> maps =service.getScanCodeQuick(query);
@@ -1467,7 +1474,7 @@ public class ScanCodeController extends BaseAction{
 				} catch (Exception e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
-				}
+				}*/
 			}else {
 				map.put("v_status", "1001");
 				map.put("v_status_msg", "支付失败");
@@ -1975,6 +1982,161 @@ public class ScanCodeController extends BaseAction{
 				outString(response, str);
 			} catch (IOException e) {
 				log.info("畅捷扫码返回信息异常");
+				e.printStackTrace();
+			}
+		}
+	}
+	
+	/**
+	 * 中信银行扫码异步
+	 * @param temp
+	 * @param response
+	 * @param request
+	 */
+	@RequestMapping(value="zxyhNotifyUrl")
+	public void zxyhNotifyUrl(HttpServletResponse response,HttpServletRequest request) {
+		log.info("中信银行支付异步参数！");
+		
+		String body = "";
+        try {
+            ServletInputStream inputStream = request.getInputStream(); 
+            BufferedReader br = new BufferedReader(new InputStreamReader(inputStream));
+            while(true){
+                String info = br.readLine();
+                if(info == null){
+                    break;
+                }
+                if(body == null || "".equals(body)){
+                    body = info;
+                }else{
+                    body += info;
+                }
+            }
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }            
+		request.getSession();
+		Map<String, String> map=null;
+		try {
+			map = XmlToMap.toMap(body.getBytes(), "UTF-8");
+			log.info("中信银行异步通知数据："+JSON.toJSONString(map));
+		} catch (Exception e2) {
+			// TODO Auto-generated catch block
+			e2.printStackTrace();
+		}
+		String str="";
+		if(!map.isEmpty()) {
+			ChannleMerchantConfigKey keyinfo=new ChannleMerchantConfigKey();
+			OriginalOrderInfo originalInfo=null;
+			try {
+				originalInfo  = this.payService.getOriginOrderInfo(map.get("out_trade_no"));
+			} catch (Exception e) {
+				log.info("中信银行查询原始订单信息返回异常");
+				e.printStackTrace();
+			}
+			keyinfo = clientCollectionPayService.getChannelConfigKey(originalInfo.getPid());
+			log.info("中信银行支付订单数据:" + JSON.toJSON(originalInfo));
+			
+			log.info("中信银行支付下游的异步地址" + originalInfo.getBgUrl());
+			if("0".equals(map.get("status"))) {
+				if("0".equals(map.get("result_code"))) {
+					str="SUCCESS";
+					try {
+						outString(response, str);
+					} catch (IOException e) {
+						log.info("中信银行支付返回信息异常"+e);
+						e.printStackTrace();
+					}
+					map.put("v_mid", originalInfo.getPid());
+					map.put("v_oid", originalInfo.getOrderId());
+					map.put("v_txnAmt", originalInfo.getOrderAmount());
+					map.put("v_attach", map.get("transaction_id"));
+					map.put("v_code", "00");
+					map.put("v_msg", "成功");
+					if("0".equals(map.get("pay_result"))) {
+						map.put("v_status", "0000");
+						map.put("v_status_msg", "支付成功");	
+					}else {
+						map.put("v_status", "1001");
+						map.put("v_status_msg", "支付失败");
+						//轮训专用的路由id作为锁定路由专用 
+						PospRouteInfo info=new PospRouteInfo();
+						info.setId(new BigDecimal(originalInfo.getUserId()));
+						info.setStatus(new BigDecimal("1"));//开启路由
+						int i =service.updateStatus(info);
+						if(i==1) {
+							log.info("开启路由成功");
+						}else {
+							log.info("开启路由失败");
+						}
+					}
+					
+					ScanCodeResponseEntity consume = (ScanCodeResponseEntity) BeanToMapUtil
+							.convertMap(ScanCodeResponseEntity.class, map);
+					try {
+						service.otherInvoke(consume);
+					} catch (Exception e1) {
+						log.info("中信银行支付修改状态失败");
+						e1.printStackTrace();
+					}
+					consume.setV_attach(originalInfo.getAttach());
+					String signs = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
+					map.put("v_sign", signs);
+					String params = HttpURLConection.parseParams(map);
+					log.info("中信银行支付给下游同步的数据:" + params);
+					String html="";
+					try {
+						html = HttpClientUtil.post(originalInfo.getBgUrl(),params);
+					}  catch (Exception e) {
+						
+						e.printStackTrace();
+					}
+				    logger.info("中信银行支付下游返回状态" + html);
+				    net.sf.json.JSONObject ob = net.sf.json.JSONObject.fromObject(html);
+					Iterator it = ob.keys();
+					Map<String, String> result = new HashMap<>();
+					while (it.hasNext()) {
+						String keys = (String) it.next();
+						if (keys.equals("success")) {
+							String value = ob.getString(keys);
+							logger.info("中信银行支付异步回馈的结果:" + "\t" + value);
+							result.put("success", value);
+						}
+					}
+					if (!result.get("success").equals("true")) {
+
+						logger.info("中信银行支付启动线程进行异步通知");
+						// 启线程进行异步通知
+						ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(),params));
+					}
+					logger.info("中信银行支付向下游 发送数据成功");
+				}else {
+					str="FALL";
+					try {
+						outString(response, str);
+					} catch (IOException e) {
+						log.info("中信银行支付扫码返回信息异常");
+						e.printStackTrace();
+					}
+				}
+			}else {
+				str="FALL";
+				try {
+					outString(response, str);
+				} catch (IOException e) {
+					log.info("中信银行支付扫码返回信息异常");
+					e.printStackTrace();
+				}
+			}
+			
+		}else {
+			str="FALL";
+			try {
+				outString(response, str);
+			} catch (IOException e) {
+				log.info("中信银行支付扫码返回信息异常");
 				e.printStackTrace();
 			}
 		}

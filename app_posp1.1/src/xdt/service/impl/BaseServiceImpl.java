@@ -1736,7 +1736,7 @@ public class BaseServiceImpl {
 			Date now = new Date();
 			
 			String currentDay = DateUtil.format(now);
-		
+			
 			for(Iterator it = result.iterator();it.hasNext();){
 				PospRouteInfo route = (PospRouteInfo)it.next();
 				
@@ -1825,7 +1825,7 @@ public class BaseServiceImpl {
 		try {
 			PospRouteInfo route = route(merid);
 			if(route==null){
-				return businessPos;
+				return null;
 			}
 			System.out.println(route);
 			PmsBusinessInfo busInfo = new PmsBusinessInfo();
@@ -1833,7 +1833,7 @@ public class BaseServiceImpl {
 			busInfo = pmsBusinessInfoDao.searchById(route.getMerchantId()
 					.toString());
 			if(busInfo==null) {
-				return businessPos;
+				return null;
 			}
 			businessPos.setBusinessnum(busInfo.getBusinessNum());
 			businessPos = businessPosDao.searchById(businessPos
@@ -1845,6 +1845,7 @@ public class BaseServiceImpl {
 				String newStr = businessPos.getBusinessnum().substring(0,i);
 				businessPos.setBusinessnum(newStr);
 			}
+			businessPos.setPospRouteId(route.getId());
 			System.out.println(JSON.toJSON(businessPos));
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -1853,6 +1854,46 @@ public class BaseServiceImpl {
 		return businessPos;
 	}
 
+	
+	 /**
+		 * 根据中间表id查询上游商户号密钥
+		 * 
+		 * @param obj
+		 * @return
+		 */
+		public PmsBusinessPos selectKey(Long id) {
+			PmsBusinessPos businessPos = new PmsBusinessPos();
+			try {
+				PospRouteInfo route = pospRouteInfoDao.getPospRouteInfo(id);
+				if(route==null){
+					return null;
+				}
+				System.out.println(route);
+				PmsBusinessInfo busInfo = new PmsBusinessInfo();
+				System.out.println(route.getMerchantId().toString());
+				busInfo = pmsBusinessInfoDao.searchById(route.getMerchantId()
+						.toString());
+				if(busInfo==null) {
+					return null;
+				}
+				businessPos.setBusinessnum(busInfo.getBusinessNum());
+				businessPos = businessPosDao.searchById(businessPos
+						.getBusinessnum());
+				businessPos.setOutPay(route.getOutPay());
+				businessPos.setGoldPay(route.getGoldPay());
+				int i = businessPos.getBusinessnum().indexOf("-");
+				if(i>0) {
+					String newStr = businessPos.getBusinessnum().substring(0,i);
+					businessPos.setBusinessnum(newStr);
+				}
+				businessPos.setPospRouteId(route.getId());
+				System.out.println(JSON.toJSON(businessPos));
+			} catch (Exception e) {
+				e.printStackTrace();
+				
+			}
+			return businessPos;
+		}
 	/**
 	 * 查询通道费率和代付手续费
 	 * 

@@ -11,7 +11,7 @@ String basePath = request.getScheme()+"://"+request.getServerName()+":"+request.
 </head>
 <body>
 	商户订单数据
-	<form action="${pageContext.request.contextPath }/conformity/wap_pay_sign.action" method="post">
+	<form action="../conformity/wap_pay_sign.action" method="post">
 	    <input type="text" name="v_version" value="1.0.0.0"> <br>
 	    <input type="text" name="v_mid" value="100341512318531">商户号<br>
 	    <input type="text" name="v_oid" value="<%=UtilDate.PayRandomOrder()%>">商户订单号(不为空，只允许使用字母、数字、-、_,并以字母或数字开头，长度小于32，成功支付的订单不允许重复支付)<br>

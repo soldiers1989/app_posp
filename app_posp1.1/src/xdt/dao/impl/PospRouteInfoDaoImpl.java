@@ -110,4 +110,9 @@ public class PospRouteInfoDaoImpl extends BaseDaoImpl<PospRouteInfo> implements 
    	 String sql = this.getStatementId("insertPospRouteInfo");
    	 return sqlSession.insert(sql, info);
    }
+    
+	public int updateStatus(PospRouteInfo info){
+	  	 String sql = this.getStatementId("updateStatus");
+	  	 return sqlSession.update(sql, info);
+	  }
 }

@@ -3,7 +3,6 @@ package xdt.service.impl;
 
 import static com.jiupai.paysdk.entity.enums.Service.QRCODESPDBPREORDER;
 import java.io.File;
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -22,15 +21,12 @@ import javax.annotation.Resource;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
-import org.mybatis.generator.codegen.mybatis3.javamapper.elements.SelectAllMethodGenerator;
 import org.springframework.stereotype.Service;
 
 import com.alibaba.fastjson.JSON;
-import com.ielpm.mer.sdk.secret.CertUtil;
 import com.ielpm.mer.sdk.secret.Secret;
 import com.ielpm.mer.sdk.secret.SecretConfig;
 import com.jiupai.paysdk.entity.requestDTO.QrcodeSpdbPreOrderDTO;
-import com.yeepay.shade.com.yeepay.g3.utils.common.CommonUtils;
 
 import net.sf.json.JSONObject;
 import xdt.dao.ChannleMerchantConfigKeyDao;
@@ -42,6 +38,7 @@ import xdt.dao.IPmsAppAmountAndRateConfigDao;
 import xdt.dao.IPmsAppTransInfoDao;
 import xdt.dao.IPmsDaifuMerchantInfoDao;
 import xdt.dao.IPmsMerchantInfoDao;
+import xdt.dao.IPospRouteInfoDAO;
 import xdt.dao.IPospTransInfoDAO;
 import xdt.dao.OriginalOrderInfoDao;
 import xdt.dto.cj.BaseConstant;
@@ -53,13 +50,13 @@ import xdt.dto.jsds.JsdsResponseDto;
 import xdt.dto.jsds.JsdsUtils;
 import xdt.dto.mb.HttpService;
 import xdt.dto.mb.MBUtil;
-import xdt.dto.quickPay.util.MbUtilThread;
 import xdt.dto.scanCode.entity.ScanCodeRequestEntity;
 import xdt.dto.scanCode.entity.ScanCodeResponseEntity;
 import xdt.dto.scanCode.util.RequestUtil;
 import xdt.dto.scanCode.util.ResponseUtil;
 import xdt.dto.scanCode.util.ScanCodeUtil;
 import xdt.dto.scanCode.util.ZHJHThread;
+import xdt.dto.scanCode.util.ZXYHThread;
 import xdt.model.AppRateConfig;
 import xdt.model.AppRateTypeAndAmount;
 import xdt.model.OriginalOrderInfo;
@@ -67,6 +64,7 @@ import xdt.model.PmsAppTransInfo;
 import xdt.model.PmsBusinessPos;
 import xdt.model.PmsDaifuMerchantInfo;
 import xdt.model.PmsMerchantInfo;
+import xdt.model.PospRouteInfo;
 import xdt.model.PospTransInfo;
 import xdt.model.ResultInfo;
 import xdt.schedule.ThreadPool;
@@ -81,6 +79,7 @@ import xdt.util.PaymentCodeEnum;
 import xdt.util.RSAUtil;
 import xdt.util.TradeTypeEnum;
 import xdt.util.UtilDate;
+import xdt.util.XMLUtil;
 import xdt.util.utils.MD5Utils;
 import xdt.util.utils.RequestUtils;
 
@@ -128,7 +127,8 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 	private IAmountLimitControlDao amountLimitControlDao;// 最大值最小值总开关判断
 	@Resource
 	private IPmsDaifuMerchantInfoDao pmsDaifuMerchantInfoDao;//代付
-	
+	@Resource
+	private IPospRouteInfoDAO pospRouteInfoDAO;//绑定的路由轮训用
 	@Override
 	public Map<String, String> scanCode(ScanCodeRequestEntity entity, Map<String, String> result) {
 
@@ -174,12 +174,36 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 						result.put("v_msg", "未找到路由，请联系业务开通！");
 						return result;
 					}
+					
 					if("1".equals(pmsBusinessPos.getOutPay())) {
 						result.put("v_code", "19");
 						result.put("v_msg", "入金未开通,请联系业务经理!");
 						return result;
 					}
+					
+					entity.setPospId(pmsBusinessPos.getPospRouteId().toString());//轮训专用
+					
+					if("ZXYH".equals(pmsBusinessPos.getChannelnum())) {
+						//锁定当前路由
+						PospRouteInfo info =new PospRouteInfo();
+						info.setId(new BigDecimal(entity.getPospId()));
+						info.setStatus(new BigDecimal("2"));
+						log.info("laile1");
+						int i =updateStatus(info);
+						log.info("laile2");
+						if(i==1) {
+							log.info("锁定当前路由成功");
+						}else {
+							log.info("锁定当前路由失败");
+						}
+					}
+					if(!"2".equals(pmsBusinessPos.getStatus())) {
+						result.put("v_code", "20");
+						result.put("v_msg", "通道虚终端未出库，联系运营");
+						return result;
+					}
 					saveOrderInfo(entity);
+					
 					// 校验商户金额限制
 					Map<String, String> paramMap = new HashMap<String, String>();
 					paramMap.put("mercid", merchantinfo.getMercId());// 商户编号
@@ -467,6 +491,9 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 															case "CJ":
 																result =cjScanCodePay(entity, result,pmsBusinessPos);
 																break;
+															case "ZXYH":
+																result =zhyhScanCodePay(entity, result,pmsBusinessPos);
+																break;
 															default:
 																result.put("v_code", "11");
 																result.put("v_msg", "未找到路由，请联系业务开通！");
@@ -564,6 +591,7 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		original.setBankId(entity.getV_merchantBankCode());
 		original.setSumCode(entity.getV_clientIP());
 		original.setAttach(entity.getV_attach());
+		original.setUserId(entity.getPospId());//轮训专用
 		int ii=0;
 		try {
 			ii = originalDao.insert(original);
@@ -1486,11 +1514,12 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		com.alibaba.fastjson.JSONObject json =com.alibaba.fastjson.JSONObject.parseObject(str);
 		if("0000".equals(json.getString("resultCode"))) {
 			result.put("v_result", json.getString("payMessage"));
-			if("ALIPAY_H5".equals(entity.getV_cardType())) {
-				result.put("v_code", "0000");
+			/*if("ALIPAY_H5".equals(entity.getV_cardType())) {
+				result.put("v_code", "00");
 			}else {
 				result.put("v_code", "00");
-			}
+			}*/
+			result.put("v_code", "00");
 			result.put("v_msg", "请求成功");
 		}else {
 			result.put("v_code", "01");
@@ -1795,6 +1824,82 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		}
      	return result;
 	}
+	
+	/**
+	 * 中信银行给上游发送参数
+	 * @param entity
+	 * @param result
+	 * @param pmsBusinessPos
+	 * @return
+	 * @throws Exception
+	 */
+	public Map<String, String> zhyhScanCodePay(ScanCodeRequestEntity entity,Map<String, String> result,PmsBusinessPos pmsBusinessPos) throws Exception{
+		log.info("来了啊！");
+		TreeMap<String, String> origMap = new TreeMap<String, String>();
+		DecimalFormat df =new DecimalFormat("#");
+		// 基本参数
+		if("ALIPAY_NATIVE".equals(entity.getV_cardType())){
+			origMap.put("service", "pay.alipay.native");
+		}else if("WEIXIN_NATIVE".equals(entity.getV_cardType())){
+			origMap.put("service", "pay.weixin.native");
+		}
+		origMap.put("charset", "UTF-8");
+		origMap.put("version", "2.0");
+		origMap.put("sign_type", "RSA_1_256");
+		origMap.put("mch_id",pmsBusinessPos.getBusinessnum());//生产环境测试商户号
+		origMap.put("out_trade_no", entity.getV_oid());
+		origMap.put("body", entity.getV_productDesc());
+		origMap.put("total_fee", df.format(new BigDecimal(entity.getV_txnAmt()).multiply(new BigDecimal("100")).doubleValue()));
+		origMap.put("mch_create_ip", entity.getV_clientIP());// 
+		origMap.put("notify_url", ScanCodeUtil.zxyhNotifyUrl);
+		origMap.put("nonce_str", String.valueOf(new Date().getTime()));
+		origMap.put("attach", entity.getV_attach()==null?"":entity.getV_attach());
+		String paramSrc = RequestUtils.getParamSrcs(origMap);
+		log.info("中信银行签名前数据**********支付:" + paramSrc+"&key="+pmsBusinessPos.getKek());
+		log.info(JSON.toJSONString(origMap));
+		//String sign=MD5Utils.sign(paramSrc , pmsBusinessPos.getKek(), "UTF-8").toUpperCase();//
+		String key =pmsBusinessPos.getKek();
+		//String key ="MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDYvoSIsBdm9SPK6WwZMslcUNgzyGXdV4qIuKpJAQY3SvnDHzp+e1JqDM47BwNfUHyuMu0HCrr0wnRDX1TpvVcmC0i4GcdVwEYWhSotfQ0PPavbFVio9tzgGrniHPSotPaii7NBeyYsN29jXG17K8f9ji2mFsUj+D5tk55Q5I5llehV6uQjoqpnVYLxs9iBy+c4LgyvxN5HhY5NX3Wrb0amenV0y/DAeNNexp+SmqTIlVGZ59m60wwiGAj34Uiv3L3ORxzB0kVYbHeGIRSBEsRgCVA7SB23i0Bprc6W8WC3Ce8BlhnP++RY1eeuF48KRJo6Fz0PpDctuhVtCozLBug7AgMBAAECggEAGHrcKTwKSJyjYEWg6e+sgnq3EJIvvyImCW8h/IDbHN+g+gLK7oIrOsMbf9s47EkA7APgdY0mtIJJ81oPEx9JeoiHvBNdSjgfMmfz7ZNUKEaE5IeyrdLD+6PJHtq6X1uhB5bTti+cjh3svMIxs1msitzGFx43QerF0kZ7+RL3ak2g6Vi3lr1J2+zWAIC8Lr+ns+9s7Bssp2LXQ96+CSvURQ39RfBfaVF+z/iAHbbWckypZ+Tzx3ZYRQZqdjA0yT09JXZTT+3zchIccbnvf0/2wGPP923A/bLawLWdVkao+Bc+RUtLS1+fDXOwEY2yyumfJbRxZL6AP9rZkHUitK0akQKBgQDwloAPVn7SowRQIEprzblyKpCLtLZBqyS0E5VS4+d2FF1qr94hyd75GFgskuUfn4RFnS1cU4jViIXdLvtS5dnqaLBOB6+Fh7Ujeb85ZtaJTgdlag2lMnv0U3+xrfi5U24RC2Vwo7JQXfKJIDpDIAedQx2qfbp6JHRzNs93cr4YVwKBgQDmoP7BLPrfioko8xKF1ITHy5ZrNUuYBrX6kqxlUw1VR0MTEns3JQ1c4zIPdIFKduoLe9n5RgO84bEtWtMuY8a0CdFv9GccgMU2uceQN4NV9yZbl2laln798GZ8OxOoDgmgy99vL15QgG5HwQ8EpfPfc8XLhoDpJ5mOus5yCjKQvQKBgQCOwy/AajodccB4b4DZ0ZzOgzV8wUI5W34PIWPFaRmLNvBsA2oTsL+QHoMMCCrQBg8uY+Nr2uHim/2bT2qxOVWDRJYB54ue9/Vj1LXFMSHzHgtDgZgRRBDL3dRzMeHazwgMMzABlBGWoPjvp+EKvfHmvtHWvn6uRf2X9JlNrxfgRwKBgQDd9TnY7pIvS6P/rhg4hrSXmL8WRL+Q+3xuQHT8OzcMyL2sAFBnXRiEOf/20diQsutCzBqXBiQYx1j+Xnf6IHqe0Qgo6B3IV8H1jkya5mJW/LqE0a7KSSbE/HWVwEGFrqTjhPJvjjYF4eTA1/O9NH4FouVMoBE20y69J9oB9QB/PQKBgCtAYzgtXrTI6155X8lrvU7N7fCu4I+atQe5LcmcBtJIuk5CmeV52K4UukVQv43sxS+YILmJ32+GHG7C0+tha5K1spoS5l8BsRcmd08foFO7gC2qoZp27F5mHKDRs3ron+bxiSx5UPFrxgSfau7hW0Ll0qVJgv7mIU2KjaXc3zIn";
+		String publickey="MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2L6EiLAXZvUjyulsGTLJXFDYM8hl3VeKiLiqSQEGN0r5wx86fntSagzOOwcDX1B8rjLtBwq69MJ0Q19U6b1XJgtIuBnHVcBGFoUqLX0NDz2r2xVYqPbc4Bq54hz0qLT2oouzQXsmLDdvY1xteyvH/Y4tphbFI/g+bZOeUOSOZZXoVerkI6KqZ1WC8bPYgcvnOC4Mr8TeR4WOTV91q29Gpnp1dMvwwHjTXsafkpqkyJVRmefZutMMIhgI9+FIr9y9zkccwdJFWGx3hiEUgRLEYAlQO0gdt4tAaa3OlvFgtwnvAZYZz/vkWNXnrhePCkSaOhc9D6Q3LboVbQqMywboOwIDAQAB";
+		String sign=RSAUtil.rsa256Sign(paramSrc, key);
+		System.out.println(sign);
+		origMap.put("sign", sign);
+		
+		String url ="https://pay.swiftpass.cn/pay/gateway"; 
+		Map<String, String> maps =RequestUtils.urlPost(url, XMLUtil.parseXML(origMap).toString(),"utf-8");
+		log.info("返回参数:"+JSON.toJSONString(maps));
+		result.put("v_mid", entity.getV_mid());
+ 		result.put("v_attach", entity.getV_attach());
+ 		result.put("v_txnAmt", entity.getV_txnAmt());
+ 		result.put("v_oid", entity.getV_oid());
+ 		result.put("v_cardType", entity.getV_cardType());
+		if("0".equals(maps.get("status"))) {
+			if("0".equals(maps.get("result_code"))){
+				result.put("v_result", maps.get("code_url"));
+				result.put("v_result_img", maps.get("code_img_url"));
+				result.put("v_code", "00");
+				result.put("v_msg", "请求成功");
+				ThreadPool.executor(new ZXYHThread(this,entity.getV_mid() ,entity.getV_oid()));
+			}else {
+				result.put("v_code", "01");
+				result.put("v_msg", maps.get("err_msg"));
+				PospRouteInfo info=new PospRouteInfo();
+				info.setId(new BigDecimal(entity.getPospId()));
+				info.setStatus(new BigDecimal("1"));//开启路由
+				int i =updateStatus(info);
+				if(i==1) {
+					log.info("开启路由成功");
+				}else {
+					log.info("开启路由失败");
+				}
+			}
+			
+		}else {
+			result.put("v_code", "01");
+			result.put("v_msg", maps.get("message"));
+		}
+     	return result;
+	}
 	public void otherInvoke(ScanCodeResponseEntity result) throws Exception {
 		// TODO Auto-generated method stub
 
@@ -1823,6 +1928,7 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 				// 更新流水表
 				pospTransInfo.setResponsecode("00");
 				pospTransInfo.setPospsn(result.getV_oid());
+				pospTransInfo.setTransOrderId(result.getV_attach());
 				log.info("更新流水");
 				log.info(pospTransInfo);
 				pospTransInfoDAO.updateByOrderId(pospTransInfo);
@@ -1838,10 +1944,45 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 				// 更新流水表
 				pospTransInfo.setResponsecode("02");
 				pospTransInfo.setPospsn(result.getV_oid());
+				pospTransInfo.setTransOrderId(result.getV_attach());
 				log.info("更新流水");
 				log.info(pospTransInfo);
 				pospTransInfoDAO.updateByOrderId(pospTransInfo);
 			}
+		}else if("1002".equals(result.getV_status().toString())) {
+			// 未支付
+			pmsAppTransInfo.setStatus(OrderStatusEnum.waitingClientPay.getStatus());
+			pmsAppTransInfo.setThirdPartResultCode(result.getV_msg().toString());
+			pmsAppTransInfo.setFinishtime(UtilDate.getDateFormatter());
+			// 修改订单
+			int updateAppTrans = pmsAppTransInfoDao.update(pmsAppTransInfo);
+			if (updateAppTrans == 1) {
+				// 更新流水表
+				pospTransInfo.setResponsecode("20");
+				pospTransInfo.setPospsn(result.getV_oid());
+				pospTransInfo.setTransOrderId(result.getV_attach());
+				log.info("更新流水");
+				log.info(pospTransInfo);
+				pospTransInfoDAO.updateByOrderId(pospTransInfo);
+			}
+			
+		}else if("1003".equals(result.getV_status().toString())) {
+			// 未支付
+			pmsAppTransInfo.setStatus(OrderStatusEnum.waitingClientPay.getStatus());
+			pmsAppTransInfo.setThirdPartResultCode(result.getV_msg().toString());
+			pmsAppTransInfo.setFinishtime(UtilDate.getDateFormatter());
+			// 修改订单
+			int updateAppTrans = pmsAppTransInfoDao.update(pmsAppTransInfo);
+			if (updateAppTrans == 1) {
+				// 更新流水表
+				pospTransInfo.setResponsecode("98");
+				pospTransInfo.setPospsn(result.getV_oid());
+				pospTransInfo.setTransOrderId(result.getV_attach());
+				log.info("更新流水");
+				log.info(pospTransInfo);
+				pospTransInfoDAO.updateByOrderId(pospTransInfo);
+			}
+			
 		}
 
 	}
@@ -2096,19 +2237,15 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 
 	}
 	
-	public OriginalOrderInfo getOriginOrderInfo(String tranId) throws Exception {
+	public OriginalOrderInfo getOriginOrderInfo(String oderId) throws Exception {
 
 		OriginalOrderInfo original = null;
 		// 查询流水信息
-		PospTransInfo transInfo = pospTransInfoDAO.searchBytransOrderId(tranId);
-		if(transInfo!=null) {
-			String oderId = transInfo.getOrderId();
 			log.info("根据上送订单号  查询商户上送原始信息");
 			original = originalDao.getOriginalOrderInfoByOrderid(oderId);
 			if(original!=null) {
 				return original;
 			}
-		}
 		return original;
 	}
 	/**
@@ -2214,21 +2351,173 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		}
 		return map;
 	}
-	public static void main(String[] args) {
-		String ss ="WInA0R9Ki1Ats9bvFVNlsk5GkSZLj/oeOStnk9FOdv71T6fdzCoWZk6Qh3Ak7rlf" + 
-				"UClb2yjDMVBqkdwuwbNU23/n4QcLquxtjP+tPQHmUUsueSMmKbZZBr4Uj2TPAHC6" + 
-				"klAPASYcGixEYmUWPnmCt3R0aVWVAgMBAAECgYEAgkbIm4CZeBUGXX9ASsXyKBIz" + 
-				"r9QK6dRK7Cs1xVS/y63kj8FHqTSRM282US8wqXc7JxOrWURlb2SVIPhnYG9K5qX4" + 
-				"OzLR0DBd0+y0WpmPeJKo3LxPwRn+B1uQUj09Yivt5CClP8MYaIEhE4lFqiTwH2Uw" + 
-				"I59+ZLaYsgCUvMFS+e0CQQD1FN+xVggI+v88B1pnYztxK/jXBxzcwJtjj3JQWGk9" + 
-				"dUvFp6SWTA35ZNEMHQhak+ji5x8DnOguOM2HUUOCjAQPAkEAzHfpdEULHLtGOhsX" + 
-				"qyYaDSlLBYCN5LXvUeu/v/HDhWJznHd15aGzql8XDfYzumZqx2Wg3gnYmh3ujjh0" + 
-				"swSYGwJBAM17puHko/ADoiQOdjng9WG54HVJPWXJB3++MbYzqmkhA1rBaDmrorvL" + 
-				"T4q8fNiU0toLtfEtiW3XqlseQ2AdTPkCQQDCXPJkfgVUKIlXTs2u+acl/6y67Dr1" + 
-				"wCRgwTMjaNQthSrU/5Ho2U+Kkp29vd3qQNUb+nVy2/U0e2N7ehsk2SclAkAeAR11" + 
-				"p0KkF30NOaoFbw7AXUjFLVfkEE528O9/IN05BnqISPeqKlTELTXRJEug9/f3O52c" + 
-				"csip+Ifjj0LMx0uI";
-		System.out.println(ss.trim());
+	
+	public int updateStatus(PospRouteInfo info) {
+		int i =pospRouteInfoDAO.updateStatus(info);
+		return i;
+	}
+
+	/**
+	 * 中信银行查询接口
+	 */
+	@Override
+	public Map<String, String> zxyhQuick(String merId,String orderId) {
+		
+		OriginalOrderInfo orderInfo =null;
+		PmsBusinessPos pmsBusinessPos = null;
+		try {
+			orderInfo =getOriginOrderInfo(orderId);
+			pmsBusinessPos = selectKey(Long.parseLong(orderInfo.getUserId()));
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		Map<String, String> map = new HashMap<String, String>();
+		TreeMap<String, String> origMap = new TreeMap<String, String>();
+		// 基本参数
+		origMap.put("service", "unified.trade.query");
+		origMap.put("charset", "UTF-8");
+		origMap.put("version", "2.0");
+		origMap.put("sign_type", "RSA_1_256");
+		origMap.put("mch_id", pmsBusinessPos.getBusinessnum());//生产环境测试商户号
+		origMap.put("out_trade_no", orderId);
+		origMap.put("nonce_str", String.valueOf(new Date().getTime()));
+		String paramSrc = RequestUtils.getParamSrcs(origMap);
+		log.info("中信银行签名前数据**********支付:" + paramSrc+"&key="+pmsBusinessPos.getKek());
+		log.info(JSON.toJSONString(origMap));
+		//String sign=MD5Utils.sign(paramSrc , pmsBusinessPos.getKek(), "UTF-8").toUpperCase();//
+		String sign=RSAUtil.rsa256Sign(paramSrc, pmsBusinessPos.getKek());
+		System.out.println(sign);
+		origMap.put("sign", sign);
+		
+		String url ="https://pay.swiftpass.cn/pay/gateway"; 
+		Map<String, String> maps =RequestUtils.urlPost(url, XMLUtil.parseXML(origMap).toString(),"utf-8");
+		log.info("返回参数:"+JSON.toJSONString(maps));
+		if("0".equals(maps.get("status"))) {
+			if("0".equals(maps.get("result_code"))) {
+				map.put("v_code", "00");
+		        map.put("v_msg", "请求成功");
+		        map.put("v_oid", orderId);
+				if("SUCCESS".equals(maps.get("trade_state"))){
+					map.put("v_status", "0000");
+	        		map.put("v_status_msg", "支付成功");
+				}else if("REFUND".equals(maps.get("trade_state"))) {
+					map.put("v_status", "1001");
+			        map.put("v_status_msg", "交易退款");
+				}else if("NOTPAY".equals(maps.get("trade_state"))) {
+					map.put("v_status", "1003");
+			        map.put("v_status_msg", "未支付");
+				}else if("CLOSED".equals(maps.get("trade_state"))) {
+					map.put("v_status", "1001");
+			        map.put("v_status_msg", "已关闭");
+				}else if("REVERSE".equals(maps.get("trade_state"))) {
+					map.put("v_status", "1005");
+			        map.put("v_status_msg", "已冲正");
+				}else if("REVOK".equals(maps.get("trade_state"))) {
+					map.put("v_status", "1001");
+			        map.put("v_status_msg", "已撤销");
+				}
+			}
+		}
+		return map;
+	}
+
+	/**
+	 * 中信银行关闭接口
+	 */
+	@Override
+	public Map<String, String> zxyhClick(String merId,String orderId) {
+		OriginalOrderInfo orderInfo =null;
+		PmsBusinessPos pmsBusinessPos = null;
+		try {
+			orderInfo =getOriginOrderInfo(orderId);
+			pmsBusinessPos = selectKey(Long.parseLong(orderInfo.getUserId()));
+		} catch (Exception e) {
+			
+			e.printStackTrace();
+		}
+		Map<String, String> map = new HashMap<String, String>();
+		TreeMap<String, String> origMap = new TreeMap<String, String>();
+		// 基本参数
+		origMap.put("service", "unified.trade.close");
+		origMap.put("charset", "UTF-8");
+		origMap.put("version", "2.0");
+		origMap.put("sign_type", "RSA_1_256");
+		origMap.put("mch_id", pmsBusinessPos.getBusinessnum());//生产环境测试商户号
+		origMap.put("out_trade_no", orderId);
+		origMap.put("nonce_str", String.valueOf(new Date().getTime()));
+		String paramSrc = RequestUtils.getParamSrcs(origMap);
+		log.info("中信银行签名前数据**********支付:" + paramSrc+"&key="+pmsBusinessPos.getKek());
+		log.info(JSON.toJSONString(origMap));
+		//String sign=MD5Utils.sign(paramSrc , pmsBusinessPos.getKek(), "UTF-8").toUpperCase();//
+		String sign=RSAUtil.rsa256Sign(paramSrc, pmsBusinessPos.getKek());
+		System.out.println(sign);
+		origMap.put("sign", sign);
+		
+		String url ="https://pay.swiftpass.cn/pay/gateway"; 
+		Map<String, String> maps =RequestUtils.urlPost(url, XMLUtil.parseXML(origMap).toString(),"utf-8");
+		log.info("返回参数:"+JSON.toJSONString(maps));
+		if("0".equals(maps.get("status"))){
+			map.put("v_code", "00");
+	        map.put("v_msg", "请求成功");
+	        map.put("v_oid", orderId);
+			if("0".equals(maps.get("result_code"))) {
+				 map.put("v_status", "0000");
+			     map.put("v_status_msg", "关闭成功");
+			     //锁定当前路由
+				PospRouteInfo info =new PospRouteInfo();
+				info.setId(new BigDecimal(orderInfo.getUserId()));
+				info.setStatus(new BigDecimal("1"));
+				int i =updateStatus(info);
+				if(i==1) {
+					log.info("开启当前路由成功");
+				}else {
+					log.info("开启路由失败");
+				}
+			}else if("1".equals(maps.get("result_code"))){
+				 map.put("v_status", "1002");
+			     map.put("v_status_msg", "未生成交易订单");
+			}else {
+				 map.put("v_status", "1001");
+			     map.put("v_status_msg", "关闭失败");
+			}
+		}else {
+			map.put("v_code", "01");
+	        map.put("v_msg", "请求失败");
+	        map.put("v_oid", orderId);
+		}
+		return map;
 	}
 	
+	public static void main(String[] args) {
+		String str ="MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDYvoSIsBdm9SPK\r\n" + 
+				"6WwZMslcUNgzyGXdV4qIuKpJAQY3SvnDHzp+e1JqDM47BwNfUHyuMu0HCrr0wnRD\r\n" + 
+				"X1TpvVcmC0i4GcdVwEYWhSotfQ0PPavbFVio9tzgGrniHPSotPaii7NBeyYsN29j\r\n" + 
+				"XG17K8f9ji2mFsUj+D5tk55Q5I5llehV6uQjoqpnVYLxs9iBy+c4LgyvxN5HhY5N\r\n" + 
+				"X3Wrb0amenV0y/DAeNNexp+SmqTIlVGZ59m60wwiGAj34Uiv3L3ORxzB0kVYbHeG\r\n" + 
+				"IRSBEsRgCVA7SB23i0Bprc6W8WC3Ce8BlhnP++RY1eeuF48KRJo6Fz0PpDctuhVt\r\n" + 
+				"CozLBug7AgMBAAECggEAGHrcKTwKSJyjYEWg6e+sgnq3EJIvvyImCW8h/IDbHN+g\r\n" + 
+				"+gLK7oIrOsMbf9s47EkA7APgdY0mtIJJ81oPEx9JeoiHvBNdSjgfMmfz7ZNUKEaE\r\n" + 
+				"5IeyrdLD+6PJHtq6X1uhB5bTti+cjh3svMIxs1msitzGFx43QerF0kZ7+RL3ak2g\r\n" + 
+				"6Vi3lr1J2+zWAIC8Lr+ns+9s7Bssp2LXQ96+CSvURQ39RfBfaVF+z/iAHbbWckyp\r\n" + 
+				"Z+Tzx3ZYRQZqdjA0yT09JXZTT+3zchIccbnvf0/2wGPP923A/bLawLWdVkao+Bc+\r\n" + 
+				"RUtLS1+fDXOwEY2yyumfJbRxZL6AP9rZkHUitK0akQKBgQDwloAPVn7SowRQIEpr\r\n" + 
+				"zblyKpCLtLZBqyS0E5VS4+d2FF1qr94hyd75GFgskuUfn4RFnS1cU4jViIXdLvtS\r\n" + 
+				"5dnqaLBOB6+Fh7Ujeb85ZtaJTgdlag2lMnv0U3+xrfi5U24RC2Vwo7JQXfKJIDpD\r\n" + 
+				"IAedQx2qfbp6JHRzNs93cr4YVwKBgQDmoP7BLPrfioko8xKF1ITHy5ZrNUuYBrX6\r\n" + 
+				"kqxlUw1VR0MTEns3JQ1c4zIPdIFKduoLe9n5RgO84bEtWtMuY8a0CdFv9GccgMU2\r\n" + 
+				"uceQN4NV9yZbl2laln798GZ8OxOoDgmgy99vL15QgG5HwQ8EpfPfc8XLhoDpJ5mO\r\n" + 
+				"us5yCjKQvQKBgQCOwy/AajodccB4b4DZ0ZzOgzV8wUI5W34PIWPFaRmLNvBsA2oT\r\n" + 
+				"sL+QHoMMCCrQBg8uY+Nr2uHim/2bT2qxOVWDRJYB54ue9/Vj1LXFMSHzHgtDgZgR\r\n" + 
+				"RBDL3dRzMeHazwgMMzABlBGWoPjvp+EKvfHmvtHWvn6uRf2X9JlNrxfgRwKBgQDd\r\n" + 
+				"9TnY7pIvS6P/rhg4hrSXmL8WRL+Q+3xuQHT8OzcMyL2sAFBnXRiEOf/20diQsutC\r\n" + 
+				"zBqXBiQYx1j+Xnf6IHqe0Qgo6B3IV8H1jkya5mJW/LqE0a7KSSbE/HWVwEGFrqTj\r\n" + 
+				"hPJvjjYF4eTA1/O9NH4FouVMoBE20y69J9oB9QB/PQKBgCtAYzgtXrTI6155X8lr\r\n" + 
+				"vU7N7fCu4I+atQe5LcmcBtJIuk5CmeV52K4UukVQv43sxS+YILmJ32+GHG7C0+th\r\n" + 
+				"a5K1spoS5l8BsRcmd08foFO7gC2qoZp27F5mHKDRs3ron+bxiSx5UPFrxgSfau7h\r\n" + 
+				"W0Ll0qVJgv7mIU2KjaXc3zIn";
+		
+		str =str.replace("\r\n","");
+		System.out.println(str);
+	}
 }

@@ -7,6 +7,7 @@ import xdt.dto.jsds.JsdsResponseDto;
 import xdt.dto.scanCode.entity.ScanCodeRequestEntity;
 import xdt.dto.scanCode.entity.ScanCodeResponseEntity;
 import xdt.model.OriginalOrderInfo;
+import xdt.model.PospRouteInfo;
 
 /** 
 * @author 作者 E-mail: 
@@ -33,5 +34,9 @@ public interface IScanCodeService {
 	public Map<String, String> handleNofity(JsdsResponseDto result) throws Exception ;
 	public Map<String, String> quickYs(String orderId,String merId);
 	public Map<String, String> zhjhQuick(String orderId,String merId);
+	public int updateStatus(PospRouteInfo info);
+	public Map<String, String> zxyhQuick(String orderId,String merId);
+	public Map<String, String> zxyhClick(String orderId,String merId);
+	
 }
 

@@ -46,7 +46,17 @@ public class ScanCodeRequestEntity {
 	
 	private String v_sign; //签名
 
+	private String pospId;
 	
+	
+	public String getPospId() {
+		return pospId;
+	}
+
+	public void setPospId(String pospId) {
+		this.pospId = pospId;
+	}
+
 	public String getV_return_url() {
 		return v_return_url;
 	}

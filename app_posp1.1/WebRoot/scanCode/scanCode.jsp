@@ -9,7 +9,6 @@
 <script src="http://pv.sohu.com/cityjson?ie=utf-8"></script>  
 </head>
 <body>
-		<form action="${pageContext.request.contextPath}/ScanCodeController/scanCode.action" id="from" method="post">
 		版本号:<input type="text" name="v_version" class="v_version" value="1.0.0.0"><br/><br/>
 		商户号:<input type="text" name="v_mid" class="v_mid" value="10032061473"><br/><br/>
 		支付订单号:<input type="text" name="v_oid" class="v_oid" value="<%=System.currentTimeMillis()%>"><br/><br/>
@@ -21,7 +20,7 @@
 		交易时间:<input type="text" name="v_time" class="v_time" value="<%=UtilDate.getOrderNum()%>"><br/><br/>
 		渠道类型:<input type="text" name="v_channel" class="v_channel" placeholder="D0:0,T1:1" value="1"><br/><br/>
 		客户端ip:<input type="text" name="v_clientIP" class="v_clientIP" value=""><br/><br/>
-		交易类型:<input type="text" name="v_cardType" class="v_cardType" value="ALIPAY_H5"><br/><br/>
+		交易类型:<input type="text" name="v_cardType" class="v_cardType" value="ALIPAY_NATIVE"><br/><br/>
 		银行商户编码:<input type="text" name="v_merchantBankCode" class="v_merchantBankCode" value="" ><br/><br/>
 		子商户号:<input type="text" name="v_subMerchantNo" class="v_subMerchantNo" value="" ><br/><br/>
 		微信 Openid:<input type="text" name="v_openId" class="v_openId" value="" ><br/><br/>
@@ -29,7 +28,6 @@
 		APPID:<input type="text" name="v_appId" class="v_appId" value="" ><br/><br/>
 		回传参数:<input type="text" name="v_attach" class="v_attach" value="大饼夹一切" ><br/><br/>
 		<input type="button" onclick="shengcheng()" value="提交生成">
-		</form>
 		<div id="div"></div>
 		<img alt="" src="" id="img">
 		<table>
@@ -152,21 +150,24 @@
 			success:function(data){
 				$("#from").append('<input type="text" name="v_sign" class="v_sign" style="display: none" value="'+data+'"><br/>');
 				console.info($(".sign").val());
-				$("#from").submit();
-				  /* $.ajax({
+				//$("#from").submit();
+				   $.ajax({
 					url:"${pageContext.request.contextPath}/ScanCodeController/scanCode.action",
 					type:"post",
 					dataType:"json",
+					async: false,
 					data:$("input[name]").serialize()+"&v_sign="+data,
 					success:function(data){
 						console.info(data);
-						if(data.v_code=='0000'){
-							location.href=data.v_result;
-						}
-						var src="http://pan.baidu.com/share/qrcode?w=150&h=150&url="+data.v_result;
-						 $("#img").attr({"src":src});
+						 if(data.v_code=='00'){
+							 document.write(data.v_result);
+						 }else{
+							 $("#div").text(JSON.stringify(data));
+						 }
+						//var src="http://pan.baidu.com/share/qrcode?w=150&h=150&url="+data.v_result;
+						// $("#img").attr({"src":src}); 
 					}
-				});  */
+				});  
 			}
 		});
 	}

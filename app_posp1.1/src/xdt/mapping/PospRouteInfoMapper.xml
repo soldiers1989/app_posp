@@ -172,7 +172,19 @@
 		from POSP_ROUTE_INFO
 		where ID = #{id,jdbcType=DECIMAL}
 	</select>
-
+	<update id='updateStatus' parameterType='xdt.model.PospRouteInfo'>
+		update POSP_ROUTE_INFO set
+		status = #{status,jdbcType=INTEGER}
+		<where>
+			<if test="id !=null">
+				and id=#{id}
+			</if>
+			<if test="channelCode !=null">
+				and channel_code=#{channelCode}
+			</if>
+		</where>
+	</update>
+	
 	<!-- <delete id="deleteByPrimaryKey" parameterType="java.math.BigDecimal" 
 		> delete from POSP_ROUTE_INFO where ID = #{id,jdbcType=DECIMAL} </delete> 
 		<insert id="insert" parameterType="xdt.model.PospRouteInfo" > insert into 

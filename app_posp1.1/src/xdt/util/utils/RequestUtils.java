@@ -25,6 +25,12 @@ import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.methods.InputStreamRequestEntity;
 import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.httpclient.methods.RequestEntity;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.util.EntityUtils;
 import org.apache.log4j.Logger;
 import org.dom4j.Document;
 import org.dom4j.DocumentException;
@@ -36,6 +42,7 @@ import com.alibaba.fastjson.JSON;
 
 import xdt.model.ChannleMerchantConfigKey;
 import xdt.service.IClientCollectionPayService;
+import xdt.util.XmlToMap;
 
 
 
@@ -88,7 +95,18 @@ public class RequestUtils {
         String result = paramstr.substring(0, paramstr.length() - 1);
         return result;
     }
-    
+    public static String getParamSrcs(TreeMap<String, String> paramsMap) {
+        StringBuffer paramstr = new StringBuffer();
+        for (String pkey : paramsMap.keySet()) {
+            String pvalue = paramsMap.get(pkey);
+            if (null != pvalue && "" != pvalue && !pkey.equals("sign")) {// 空值不传递，不签名
+                paramstr.append(pkey + "=" + pvalue + "&"); // 签名原串，不url编码
+            }
+        }
+        // 去掉最后一个&
+        String result = paramstr.substring(0, paramstr.length() - 1);
+        return result;
+    }
     
     public static String getParamSrcs(LinkedHashMap<String, String> paramsMap) {
         StringBuffer paramstr = new StringBuffer();
@@ -150,7 +168,25 @@ public class RequestUtils {
         }
         return result;
     }
-
+    
+    public static Map<String,String> urlPost(String url,String xml,String charset) {
+    	CloseableHttpResponse response = null;
+        CloseableHttpClient client = null;
+        Map<String,String> resultMap = new HashMap<>();
+        try {
+        	 HttpPost httpPost = new HttpPost(url);
+             StringEntity entityParams = new StringEntity(xml,"utf-8");
+             httpPost.setEntity(entityParams);
+             client = HttpClients.createDefault();
+             response = client.execute(httpPost);
+             if(response != null && response.getEntity() != null){
+            	 resultMap = XmlToMap.toMap(EntityUtils.toByteArray(response.getEntity()), "utf-8"); 
+             }
+		} catch (Exception e) {
+			// TODO: handle exception
+		}
+    	return resultMap;
+    }
     public static String sendPost(String url,String param) throws Exception{
     	  
     	byte[] requestBytes;  
