@@ -44,8 +44,10 @@ import xdt.quickpay.conformityQucikPay.entity.ConformityQucikPayRequestEntity;
 import xdt.quickpay.conformityQucikPay.entity.ConformityQuickPayQueryRequestEntity;
 import xdt.quickpay.conformityQucikPay.util.OrderStatusEnum;
 import xdt.quickpay.conformityQucikPay.util.RSAUtils;
+import xdt.quickpay.conformityQucikPay.util.SecurityUtil;
 //import xdt.quickpay.conformityQucikPay.util.SecurityUtil;
 import xdt.quickpay.conformityQucikPay.util.StringUtil;
+import xdt.quickpay.conformityQucikPay.util.Tool;
 //import xdt.quickpay.conformityQucikPay.util.Tool;
 import xdt.quickpay.conformityQucikPay.util.UtilDate;
 import xdt.quickpay.yb.util.YeepayService;
@@ -938,13 +940,13 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 			String keyStorePassword = pmsBusinessPos.getKek();
 			String keyPassword = pmsBusinessPos.getKek();
 			
-//			certId =SecurityUtil.getinit(keyStoreFilePath, keyStorePassword, keyPassword, epaylinksCertPath);			
+			certId =SecurityUtil.getinit(keyStoreFilePath, keyStorePassword, keyPassword, epaylinksCertPath);			
 		}catch(Exception e){
 			throw new RuntimeException(e);
 		}
 		paramsMap.put("version", "4.0");
 		paramsMap.put("sign_type", "SHA256withRSA");
-//		paramsMap.put("certId", certId);
+		paramsMap.put("certId", certId);
 		
 		
 
@@ -956,23 +958,23 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 		logger.info("待签名数据："+paramSrc);
 		//生成签名
 		String sign = "";
-//		try {
-//			sign = SecurityUtil.signForBase64(paramSrc.getBytes("UTF-8"));
-//		} catch (UnsupportedEncodingException e) {
-//			// TODO Auto-generated catch block
-//			e.printStackTrace();
-//		} catch (Exception e) {
-//			// TODO Auto-generated catch block
-//			e.printStackTrace();
-//		}
+		try {
+			sign = SecurityUtil.signForBase64(paramSrc.getBytes("UTF-8"));
+		} catch (UnsupportedEncodingException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 		paramsMap.put("sign", sign);
 		
 		//rsa密串
 		String cipherData="";
 		String encryptSrc="";
 		try {
-//			encryptSrc =Tool.getRequestStr(paramsMap);
-			//encryptSrc = paramSrc + "&sign=" + sign;//加密原串
+			encryptSrc =Tool.getRequestStr(paramsMap);
+			encryptSrc = paramSrc + "&sign=" + sign;//加密原串
 			logger.info("转码之前的数据："+encryptSrc);
 			cipherData = URLEncoder.encode(encryptSrc,"UTF-8");
 			logger.info("转码之后的数据："+cipherData);

@@ -19,6 +19,7 @@ import java.util.TreeMap;
 import javax.annotation.Resource;
 
 import org.apache.commons.codec.digest.DigestUtils;
+import org.apache.commons.collections.set.SynchronizedSet;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.springframework.stereotype.Service;
@@ -185,16 +186,20 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 					
 					if("ZXYH".equals(pmsBusinessPos.getChannelnum())) {
 						//锁定当前路由
-						PospRouteInfo info =new PospRouteInfo();
-						info.setId(new BigDecimal(entity.getPospId()));
-						info.setStatus(new BigDecimal("2"));
-						log.info("laile1");
-						int i =updateStatus(info);
-						log.info("laile2");
-						if(i==1) {
-							log.info("锁定当前路由成功");
+						if("102535775847".equals(pmsBusinessPos.getBusinessnum())){
+							
 						}else {
-							log.info("锁定当前路由失败");
+							PospRouteInfo info =new PospRouteInfo();
+							info.setId(new BigDecimal(entity.getPospId()));
+							info.setStatus(new BigDecimal("2"));
+							log.info("laile1");
+							int i =updateStatus(info);
+							log.info("laile2");
+							if(i==1) {
+								log.info("锁定当前路由成功");
+							}else {
+								log.info("锁定当前路由失败");
+							}
 						}
 					}
 					if(!"2".equals(pmsBusinessPos.getStatus())) {
@@ -1837,11 +1842,22 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		log.info("来了啊！");
 		TreeMap<String, String> origMap = new TreeMap<String, String>();
 		DecimalFormat df =new DecimalFormat("#");
+		SimpleDateFormat format =new SimpleDateFormat("yyyyMMddhhmmss");
+		Date date=new Date();
+		Date afterDate = new Date(date.getTime() + 300000);
+
+
 		// 基本参数
 		if("ALIPAY_NATIVE".equals(entity.getV_cardType())){
 			origMap.put("service", "pay.alipay.native");
 		}else if("WEIXIN_NATIVE".equals(entity.getV_cardType())){
 			origMap.put("service", "pay.weixin.native");
+		}else if("UNIONPAY_NATIVE".equals(entity.getV_cardType())) {
+			origMap.put("service", "pay.unionpay.native");
+		}else if("QQ_NATIVE".equals(entity.getV_cardType())) {
+			origMap.put("service", "pay.tenpay.native");
+		}else if("JD_NATIVE".equals(entity.getV_cardType())) {
+			origMap.put("service", "pay.jdpay.native");
 		}
 		origMap.put("charset", "UTF-8");
 		origMap.put("version", "2.0");
@@ -1852,6 +1868,10 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		origMap.put("total_fee", df.format(new BigDecimal(entity.getV_txnAmt()).multiply(new BigDecimal("100")).doubleValue()));
 		origMap.put("mch_create_ip", entity.getV_clientIP());// 
 		origMap.put("notify_url", ScanCodeUtil.zxyhNotifyUrl);
+		origMap.put("limit_credit_pay", "1");
+		origMap.put("time_start", format.format(date));
+		origMap.put("time_expire", format.format(afterDate));
+		
 		origMap.put("nonce_str", String.valueOf(new Date().getTime()));
 		origMap.put("attach", entity.getV_attach()==null?"":entity.getV_attach());
 		String paramSrc = RequestUtils.getParamSrcs(origMap);
@@ -2490,34 +2510,10 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 	}
 	
 	public static void main(String[] args) {
-		String str ="MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDYvoSIsBdm9SPK\r\n" + 
-				"6WwZMslcUNgzyGXdV4qIuKpJAQY3SvnDHzp+e1JqDM47BwNfUHyuMu0HCrr0wnRD\r\n" + 
-				"X1TpvVcmC0i4GcdVwEYWhSotfQ0PPavbFVio9tzgGrniHPSotPaii7NBeyYsN29j\r\n" + 
-				"XG17K8f9ji2mFsUj+D5tk55Q5I5llehV6uQjoqpnVYLxs9iBy+c4LgyvxN5HhY5N\r\n" + 
-				"X3Wrb0amenV0y/DAeNNexp+SmqTIlVGZ59m60wwiGAj34Uiv3L3ORxzB0kVYbHeG\r\n" + 
-				"IRSBEsRgCVA7SB23i0Bprc6W8WC3Ce8BlhnP++RY1eeuF48KRJo6Fz0PpDctuhVt\r\n" + 
-				"CozLBug7AgMBAAECggEAGHrcKTwKSJyjYEWg6e+sgnq3EJIvvyImCW8h/IDbHN+g\r\n" + 
-				"+gLK7oIrOsMbf9s47EkA7APgdY0mtIJJ81oPEx9JeoiHvBNdSjgfMmfz7ZNUKEaE\r\n" + 
-				"5IeyrdLD+6PJHtq6X1uhB5bTti+cjh3svMIxs1msitzGFx43QerF0kZ7+RL3ak2g\r\n" + 
-				"6Vi3lr1J2+zWAIC8Lr+ns+9s7Bssp2LXQ96+CSvURQ39RfBfaVF+z/iAHbbWckyp\r\n" + 
-				"Z+Tzx3ZYRQZqdjA0yT09JXZTT+3zchIccbnvf0/2wGPP923A/bLawLWdVkao+Bc+\r\n" + 
-				"RUtLS1+fDXOwEY2yyumfJbRxZL6AP9rZkHUitK0akQKBgQDwloAPVn7SowRQIEpr\r\n" + 
-				"zblyKpCLtLZBqyS0E5VS4+d2FF1qr94hyd75GFgskuUfn4RFnS1cU4jViIXdLvtS\r\n" + 
-				"5dnqaLBOB6+Fh7Ujeb85ZtaJTgdlag2lMnv0U3+xrfi5U24RC2Vwo7JQXfKJIDpD\r\n" + 
-				"IAedQx2qfbp6JHRzNs93cr4YVwKBgQDmoP7BLPrfioko8xKF1ITHy5ZrNUuYBrX6\r\n" + 
-				"kqxlUw1VR0MTEns3JQ1c4zIPdIFKduoLe9n5RgO84bEtWtMuY8a0CdFv9GccgMU2\r\n" + 
-				"uceQN4NV9yZbl2laln798GZ8OxOoDgmgy99vL15QgG5HwQ8EpfPfc8XLhoDpJ5mO\r\n" + 
-				"us5yCjKQvQKBgQCOwy/AajodccB4b4DZ0ZzOgzV8wUI5W34PIWPFaRmLNvBsA2oT\r\n" + 
-				"sL+QHoMMCCrQBg8uY+Nr2uHim/2bT2qxOVWDRJYB54ue9/Vj1LXFMSHzHgtDgZgR\r\n" + 
-				"RBDL3dRzMeHazwgMMzABlBGWoPjvp+EKvfHmvtHWvn6uRf2X9JlNrxfgRwKBgQDd\r\n" + 
-				"9TnY7pIvS6P/rhg4hrSXmL8WRL+Q+3xuQHT8OzcMyL2sAFBnXRiEOf/20diQsutC\r\n" + 
-				"zBqXBiQYx1j+Xnf6IHqe0Qgo6B3IV8H1jkya5mJW/LqE0a7KSSbE/HWVwEGFrqTj\r\n" + 
-				"hPJvjjYF4eTA1/O9NH4FouVMoBE20y69J9oB9QB/PQKBgCtAYzgtXrTI6155X8lr\r\n" + 
-				"vU7N7fCu4I+atQe5LcmcBtJIuk5CmeV52K4UukVQv43sxS+YILmJ32+GHG7C0+th\r\n" + 
-				"a5K1spoS5l8BsRcmd08foFO7gC2qoZp27F5mHKDRs3ron+bxiSx5UPFrxgSfau7h\r\n" + 
-				"W0Ll0qVJgv7mIU2KjaXc3zIn";
-		
-		str =str.replace("\r\n","");
-		System.out.println(str);
+		SimpleDateFormat format =new SimpleDateFormat("yyyyMMddhhmmss");
+		Date date=new Date();
+		Date afterDate = new Date(date.getTime() + 300000);
+		System.out.println(format.format(date));
+		System.out.println(format.format(afterDate));
 	}
 }
