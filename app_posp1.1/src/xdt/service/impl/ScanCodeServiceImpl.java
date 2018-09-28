@@ -170,6 +170,7 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 				} else if ("60".equals(merchantinfo.getMercSts())) {
 					// 判断是否为正式商户
 					PmsBusinessPos pmsBusinessPos =selectKey(entity.getV_mid());//获取上游商户号和秘钥
+					log.info("路由信息："+JSON.toJSONString(pmsBusinessPos));
 					if(pmsBusinessPos==null){
 						result.put("v_code", "18");
 						result.put("v_msg", "未找到路由，请联系业务开通！");
@@ -601,7 +602,7 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		try {
 			ii = originalDao.insert(original);
 		} catch (Exception e) {
-			log.info("插入订单原始表出错~");
+			log.info("插入订单原始表出错~"+e);
 			e.printStackTrace();
 		}
 		
@@ -1875,16 +1876,14 @@ public class ScanCodeServiceImpl extends BaseServiceImpl implements IScanCodeSer
 		origMap.put("nonce_str", String.valueOf(new Date().getTime()));
 		origMap.put("attach", entity.getV_attach()==null?"":entity.getV_attach());
 		String paramSrc = RequestUtils.getParamSrcs(origMap);
-		log.info("中信银行签名前数据**********支付:" + paramSrc+"&key="+pmsBusinessPos.getKek());
 		log.info(JSON.toJSONString(origMap));
 		//String sign=MD5Utils.sign(paramSrc , pmsBusinessPos.getKek(), "UTF-8").toUpperCase();//
 		String key =pmsBusinessPos.getKek();
 		//String key ="MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDYvoSIsBdm9SPK6WwZMslcUNgzyGXdV4qIuKpJAQY3SvnDHzp+e1JqDM47BwNfUHyuMu0HCrr0wnRDX1TpvVcmC0i4GcdVwEYWhSotfQ0PPavbFVio9tzgGrniHPSotPaii7NBeyYsN29jXG17K8f9ji2mFsUj+D5tk55Q5I5llehV6uQjoqpnVYLxs9iBy+c4LgyvxN5HhY5NX3Wrb0amenV0y/DAeNNexp+SmqTIlVGZ59m60wwiGAj34Uiv3L3ORxzB0kVYbHeGIRSBEsRgCVA7SB23i0Bprc6W8WC3Ce8BlhnP++RY1eeuF48KRJo6Fz0PpDctuhVtCozLBug7AgMBAAECggEAGHrcKTwKSJyjYEWg6e+sgnq3EJIvvyImCW8h/IDbHN+g+gLK7oIrOsMbf9s47EkA7APgdY0mtIJJ81oPEx9JeoiHvBNdSjgfMmfz7ZNUKEaE5IeyrdLD+6PJHtq6X1uhB5bTti+cjh3svMIxs1msitzGFx43QerF0kZ7+RL3ak2g6Vi3lr1J2+zWAIC8Lr+ns+9s7Bssp2LXQ96+CSvURQ39RfBfaVF+z/iAHbbWckypZ+Tzx3ZYRQZqdjA0yT09JXZTT+3zchIccbnvf0/2wGPP923A/bLawLWdVkao+Bc+RUtLS1+fDXOwEY2yyumfJbRxZL6AP9rZkHUitK0akQKBgQDwloAPVn7SowRQIEprzblyKpCLtLZBqyS0E5VS4+d2FF1qr94hyd75GFgskuUfn4RFnS1cU4jViIXdLvtS5dnqaLBOB6+Fh7Ujeb85ZtaJTgdlag2lMnv0U3+xrfi5U24RC2Vwo7JQXfKJIDpDIAedQx2qfbp6JHRzNs93cr4YVwKBgQDmoP7BLPrfioko8xKF1ITHy5ZrNUuYBrX6kqxlUw1VR0MTEns3JQ1c4zIPdIFKduoLe9n5RgO84bEtWtMuY8a0CdFv9GccgMU2uceQN4NV9yZbl2laln798GZ8OxOoDgmgy99vL15QgG5HwQ8EpfPfc8XLhoDpJ5mOus5yCjKQvQKBgQCOwy/AajodccB4b4DZ0ZzOgzV8wUI5W34PIWPFaRmLNvBsA2oTsL+QHoMMCCrQBg8uY+Nr2uHim/2bT2qxOVWDRJYB54ue9/Vj1LXFMSHzHgtDgZgRRBDL3dRzMeHazwgMMzABlBGWoPjvp+EKvfHmvtHWvn6uRf2X9JlNrxfgRwKBgQDd9TnY7pIvS6P/rhg4hrSXmL8WRL+Q+3xuQHT8OzcMyL2sAFBnXRiEOf/20diQsutCzBqXBiQYx1j+Xnf6IHqe0Qgo6B3IV8H1jkya5mJW/LqE0a7KSSbE/HWVwEGFrqTjhPJvjjYF4eTA1/O9NH4FouVMoBE20y69J9oB9QB/PQKBgCtAYzgtXrTI6155X8lrvU7N7fCu4I+atQe5LcmcBtJIuk5CmeV52K4UukVQv43sxS+YILmJ32+GHG7C0+tha5K1spoS5l8BsRcmd08foFO7gC2qoZp27F5mHKDRs3ron+bxiSx5UPFrxgSfau7hW0Ll0qVJgv7mIU2KjaXc3zIn";
-		String publickey="MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2L6EiLAXZvUjyulsGTLJXFDYM8hl3VeKiLiqSQEGN0r5wx86fntSagzOOwcDX1B8rjLtBwq69MJ0Q19U6b1XJgtIuBnHVcBGFoUqLX0NDz2r2xVYqPbc4Bq54hz0qLT2oouzQXsmLDdvY1xteyvH/Y4tphbFI/g+bZOeUOSOZZXoVerkI6KqZ1WC8bPYgcvnOC4Mr8TeR4WOTV91q29Gpnp1dMvwwHjTXsafkpqkyJVRmefZutMMIhgI9+FIr9y9zkccwdJFWGx3hiEUgRLEYAlQO0gdt4tAaa3OlvFgtwnvAZYZz/vkWNXnrhePCkSaOhc9D6Q3LboVbQqMywboOwIDAQAB";
 		String sign=RSAUtil.rsa256Sign(paramSrc, key);
-		System.out.println(sign);
+		log.info(sign);
 		origMap.put("sign", sign);
-		
+		log.info(JSON.toJSONString(origMap));
 		String url ="https://pay.swiftpass.cn/pay/gateway"; 
 		Map<String, String> maps =RequestUtils.urlPost(url, XMLUtil.parseXML(origMap).toString(),"utf-8");
 		log.info("返回参数:"+JSON.toJSONString(maps));

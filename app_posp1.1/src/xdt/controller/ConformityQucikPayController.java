@@ -190,9 +190,9 @@ public class ConformityQucikPayController extends BaseAction {
 					request.setAttribute("temp", result);
 					request.getRequestDispatcher("/quick/quick_conformity_submits.jsp").forward(request, response);
 				case "YPL"://易票联
-					url =result.get("pay_url")+ "?"+result.get("cipherData");
-					logger.info("易票联快捷上送的数据:" + url);
-					response.sendRedirect(url);
+					request.getSession();
+		            url = "/app_posp/quick/quick_conformity_submit2.jsp?pay_url=" + (String)result.get("pay_url") + "&" + (String)result.get("cipherData");
+		            response.sendRedirect(url);
 					break;
 				default:						
 					break;

@@ -629,7 +629,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 							wfbPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "YYT":
-							yytPays(payRequest, result, merchantinfo, pmsBusinessPos);
+							yytPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						case "YSZF":
 							yszfPay(payRequest, result, merchantinfo, pmsBusinessPos);

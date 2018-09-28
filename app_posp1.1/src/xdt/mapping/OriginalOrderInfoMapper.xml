@@ -36,6 +36,7 @@
 			jdbcType="VARCHAR" />
 		<result column="USERID" property="userId" jdbcType="VARCHAR" />
 		<result column="VERIFYID" property="verifyId" jdbcType="VARCHAR" />
+		<result column="TIECARDPAGEURL" property="tieCardPageUrl" jdbcType="VARCHAR" />
 			
 	</resultMap>
 	<sql id="Base_Column_List">

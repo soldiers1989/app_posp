@@ -925,8 +925,8 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 		paramsMap.put("out_trade_no",originalinfo.getV_oid() );
 		paramsMap.put("total_fee",originalinfo.getV_txnAmt());
 		paramsMap.put("currency_type", "RMB");
-		paramsMap.put("return_url", "http://ypl.lssc888.com:8107/app_posp/conformity/yplReturnUrl.action");
-		paramsMap.put("notify_url", "http://ypl.lssc888.com:8107/app_posp/conformity/yplNotifyUrl.action");
+		paramsMap.put("return_url", "http://yplpay.lssc888.com:8102/app_posp/conformity/yplReturnUrl.action");
+		paramsMap.put("notify_url", "http://yplpay.lssc888.com:8102/app_posp/conformity/yplNotifyUrl.action");
 		paramsMap.put("order_create_ip", "");
 
 		paramsMap.put("pay_id", "unionquickpay");
@@ -974,7 +974,7 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 		String encryptSrc="";
 		try {
 			encryptSrc =Tool.getRequestStr(paramsMap);
-			encryptSrc = paramSrc + "&sign=" + sign;//加密原串
+			//encryptSrc = paramSrc + "&sign=" + sign;//加密原串
 			logger.info("转码之前的数据："+encryptSrc);
 			cipherData = URLEncoder.encode(encryptSrc,"UTF-8");
 			logger.info("转码之后的数据："+cipherData);
@@ -990,6 +990,7 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 		}else {
 			retMap.put("pay_url", "https://www.epaylinks.cn/paycenter/v2.0/getoi.do");
 		}
+		retMap.putAll(paramsMap);
 		return retMap;
 	}
 }
