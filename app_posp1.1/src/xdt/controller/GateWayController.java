@@ -21,6 +21,7 @@ import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.security.interfaces.RSAPublicKey;
 import java.text.DecimalFormat;
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -42,7 +43,10 @@ import javax.ws.rs.core.MultivaluedMap;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.http.NameValuePair;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.protocol.HTTP;
 import org.apache.log4j.Logger;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -92,6 +96,9 @@ import xdt.dto.quickPay.entity.MessageRequestEntity;
 import xdt.dto.quickPay.entity.QueryRequestEntity;
 import xdt.dto.quickPay.entity.QueryResponseEntity;
 import xdt.dto.quickPay.util.MbUtilThread;
+import xdt.dto.sd.ByteUtil;
+import xdt.dto.sd.HttpClientUtils;
+import xdt.dto.sd.SMd5;
 import xdt.dto.sxf.SXFUtil;
 import xdt.dto.tfb.TFBConfig;
 import xdt.dto.yf.DoYf;
@@ -745,64 +752,64 @@ public class GateWayController extends BaseAction {
 						log.info("置单返回数据：" + JSON.toJSONString(result));
 
 						break;
-					case "SD":
-						logger.info("************************----杉德  网关支付----处理 开始");
-						// 组后台报文
-						SandpayRequestHead head = new SandpayRequestHead();
-						GatewayOrderPayRequestBody body = new GatewayOrderPayRequestBody();
-						head.setVersion("1.0");
-						head.setMethod("sandpay.trade.pay");
-						head.setProductId("00000007");
-						head.setAccessType("1");
-						head.setMid("14270526");
-						head.setChannelType("07");
-						head.setReqTime(DateUtil.getCurrentDate14());
-						DecimalFormat df = new DecimalFormat("000000000000");
-						body.setOrderCode(param.getV_oid());
-						body.setTotalAmount(df.format(Double.parseDouble(param.getV_txnAmt()) * 100));
-						body.setSubject(param.getV_productName());
-						body.setBody(param.getV_productDesc());
-						body.setPayMode("bank_pc");
-						body.setClientIp(InetAddress.getLocalHost().getHostAddress());
-						body.setNotifyUrl(BaseUtil.url+"/gateWay/sd_notifyUrl.action");
-						body.setFrontUrl(BaseUtil.url+"/gateWay/sd_returnUrl.action");
-						logger.info("下游上送的银行编码:" + param.getV_bankAddr());
-						PayBankInfo bank = new PayBankInfo();
-						bank.setBank_code(param.getV_bankAddr());
-						List<PayBankInfo> list = PayBankInfoService.selectBankCodes(bank);
-						bank = list.get(0);
-						String bancode = bank.getBank_code_id();
-						logger.info("查询银行信息:" + bancode);
-						String jsonss = "{\"bankCode\":\"" + bancode + "\",\"payType\":\"3\"}";
-						body.setPayExtra(jsonss);
-						GatewayOrderPayRequest gwOrderPayReq = new GatewayOrderPayRequest();
-						gwOrderPayReq.setHead(head);
-						gwOrderPayReq.setBody(body);
-						try {
-							// 加载证书
-							CertUtil.init("classpath:sand.cer", "classpath:14270526.pfx", "5TPM7C3CVM");
-							// 外网测试
-							GatewayOrderPayResponse gwPayResponse = SandpayClient.execute(gwOrderPayReq,
-									"https://cashier.sandpay.com.cn/gateway/api/order/pay");
-							SandpayResponseHead respHead = gwPayResponse.getHead();
-
-							if (SandpayConstants.SUCCESS_RESP_CODE.equals(respHead.getRespCode())) {
-								logger.info("txn success.");
-
-								GatewayOrderPayResponseBody respBody = gwPayResponse.getBody();
-								String credential = respBody.getCredential();
-								logger.info("杉德返回的信息:" + credential);
-								request.setAttribute("JWP_ATTR", credential);
-								// String url = "jsp/middle.jsp";
-								request.getRequestDispatcher("/middle.jsp").forward(request, response);
-							} else {
-								logger.error("txn fail respCode[{}],respMsg[{}]." + respHead.getRespCode()
-										+ respHead.getRespMsg());
-							}
-						} catch (Exception e) {
-							e.printStackTrace();
-						}
-						break;
+//					case "SD":
+//						logger.info("************************----杉德  网关支付----处理 开始");
+//						// 组后台报文
+//						SandpayRequestHead head = new SandpayRequestHead();
+//						GatewayOrderPayRequestBody body = new GatewayOrderPayRequestBody();
+//						head.setVersion("1.0");
+//						head.setMethod("sandpay.trade.pay");
+//						head.setProductId("00000007");
+//						head.setAccessType("1");
+//						head.setMid("14270526");
+//						head.setChannelType("07");
+//						head.setReqTime(DateUtil.getCurrentDate14());
+//						DecimalFormat df = new DecimalFormat("000000000000");
+//						body.setOrderCode(param.getV_oid());
+//						body.setTotalAmount(df.format(Double.parseDouble(param.getV_txnAmt()) * 100));
+//						body.setSubject(param.getV_productName());
+//						body.setBody(param.getV_productDesc());
+//						body.setPayMode("bank_pc");
+//						body.setClientIp(InetAddress.getLocalHost().getHostAddress());
+//						body.setNotifyUrl(BaseUtil.url+"/gateWay/sd_notifyUrl.action");
+//						body.setFrontUrl(BaseUtil.url+"/gateWay/sd_returnUrl.action");
+//						logger.info("下游上送的银行编码:" + param.getV_bankAddr());
+//						PayBankInfo bank = new PayBankInfo();
+//						bank.setBank_code(param.getV_bankAddr());
+//						List<PayBankInfo> list = PayBankInfoService.selectBankCodes(bank);
+//						bank = list.get(0);
+//						String bancode = bank.getBank_code_id();
+//						logger.info("查询银行信息:" + bancode);
+//						String jsonss = "{\"bankCode\":\"" + bancode + "\",\"payType\":\"3\"}";
+//						body.setPayExtra(jsonss);
+//						GatewayOrderPayRequest gwOrderPayReq = new GatewayOrderPayRequest();
+//						gwOrderPayReq.setHead(head);
+//						gwOrderPayReq.setBody(body);
+//						try {
+//							// 加载证书
+//							CertUtil.init("classpath:sand.cer", "classpath:14270526.pfx", "5TPM7C3CVM");
+//							// 外网测试
+//							GatewayOrderPayResponse gwPayResponse = SandpayClient.execute(gwOrderPayReq,
+//									"https://cashier.sandpay.com.cn/gateway/api/order/pay");
+//							SandpayResponseHead respHead = gwPayResponse.getHead();
+//
+//							if (SandpayConstants.SUCCESS_RESP_CODE.equals(respHead.getRespCode())) {
+//								logger.info("txn success.");
+//
+//								GatewayOrderPayResponseBody respBody = gwPayResponse.getBody();
+//								String credential = respBody.getCredential();
+//								logger.info("杉德返回的信息:" + credential);
+//								request.setAttribute("JWP_ATTR", credential);
+//								// String url = "jsp/middle.jsp";
+//								request.getRequestDispatcher("/middle.jsp").forward(request, response);
+//							} else {
+//								logger.error("txn fail respCode[{}],respMsg[{}]." + respHead.getRespCode()
+//										+ respHead.getRespMsg());
+//							}
+//						} catch (Exception e) {
+//							e.printStackTrace();
+//						}
+//						break;
 					case "JBB":
 						logger.info("************************----聚佰宝  网关支付----处理 开始");
 
@@ -1032,6 +1039,79 @@ public class GateWayController extends BaseAction {
 						result.put("cardType", "1");
 						//result.put("referDomain", "maijie1349.com");
 						break;
+					case "SD":
+						logger.info("#############杉德网关支付处理 开始#############");
+						JSONObject jsonObj = new JSONObject();
+						jsonObj.put("merId", busInfo.getBusinessnum());//62010002给下面商户测试
+						jsonObj.put("orderId", param.getV_oid());//订单号
+						jsonObj.put("goods", param.getV_productDesc());//商品描述
+						jsonObj.put("amount", param.getV_txnAmt());//付款金额，单位元，精确到小数点后二位
+						String format1=new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+						jsonObj.put("expTime", dateonePlus(format1));//订单有效截止时间，当前时间加一天
+						jsonObj.put("notifyUrl", BaseUtil.url+"/gateWay/SD_notifyUrl.action");//支付成功回调地址
+						jsonObj.put("pageUrl", BaseUtil.url+"/gateWay/SD_returnUrl.action?orderId="+param.getV_oid());//支付成功返回商户页面
+						jsonObj.put("reserve", param.getV_attach());//通知商户支付结果时，返回给商户
+						jsonObj.put("extendInfo", "");//订单扩展信息,建议空串
+						jsonObj.put("payMode", "01");//支付模式,01:网银支付模式
+						jsonObj.put("cardBankId", param.getV_bankAddr());//银行卡银行代码，网银支付必填
+						jsonObj.put("creditType", "2");//允许支付的卡类型
+						jsonObj.put("userId", param.getV_mid());//商户平台用户
+						jsonObj.put("clientIp", InetAddress.getLocalHost().getHostAddress());//商户平台用户登录ip
+						
+						String tradeData=jsonObj.toString();
+						String md5Src = tradeData + "&" + busInfo.getKek();  //md5源串
+						byte[] bTradeSign = SMd5.md5(md5Src.getBytes("UTF-8")); //md5加密
+						String tradeSign = ByteUtil.bytes2HexStr(bTradeSign);//字节转字符,如0x1234AB -> “1234AB”
+						
+						List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+						nvps.add(new BasicNameValuePair("tradeId","payGateway"));
+						nvps.add(new BasicNameValuePair("ver","1.0"));
+						nvps.add(new BasicNameValuePair("tradeData",tradeData));//交易数据
+						nvps.add(new BasicNameValuePair("tradeSign",tradeSign));//交易签名
+						String surl = "https://payment.newpaypay.com/sdk/json.do";
+						String responses = HttpClientUtils.doPost(surl,nvps,HTTP.UTF_8).trim();
+						logger.info("响应信息=" + responses);
+						if(responses!=null&&responses!="") {
+							//返回数据处理
+							JSONObject jsonResp = JSONObject.fromObject(responses);
+							String backSign = jsonResp.getString("backSign");
+							String info = jsonResp.getString("info");
+							String status = jsonResp.getString("status");
+							logger.info("backSign="+backSign);
+							logger.info("info="+info);
+							logger.info("status="+status);
+							
+							if(status!=null&&!status.equals("0000")){
+								logger.info("请求失败");
+								result.put("v_msg","请求失败("+info+")");
+								result.put("v_code","15");
+								outString(response, JSON.toJSON(result));
+							}
+							
+							//有数据
+							JSONObject backData = jsonResp.getJSONObject("backData");
+							md5Src = backData + "&" + busInfo.getKek();
+							logger.info("md5Src: " + md5Src);
+							boolean check = SMd5.md5Verify(md5Src, backSign);
+							if(!check){
+								logger.info("查询验签名失败");
+								result.put("v_msg","请求失败");
+								result.put("v_code","15");
+								outString(response, JSON.toJSON(result));
+							}
+							
+							logger.info("查询验签名成功");
+							String payUrl = backData.getString("payUrl");	
+							result.put("payUrl", payUrl);
+							String payParams = backData.getString("payParams");
+							result.put("payParams", payParams);
+						}else {
+							logger.info("杉德网关支付无响应信息");
+							result.put("v_msg","请求失败(支付无响应)");
+							result.put("v_code","15");
+							outString(response, JSON.toJSON(result));
+						}
+						break;
 					default:
 						break;
 					}
@@ -1160,6 +1240,18 @@ public class GateWayController extends BaseAction {
 						/*html = EffersonPayService.createAutoFormHtml(
 								"https://gateway.gopay.com.cn/Trans/WebClientAction.do", result, "UTF-8");
 						outString(response, html);*/
+						break;
+					case "SD":
+						logger.info("************************杉德----网关支付----请求开始");
+						result.remove("v_msg");
+						result.remove("v_code");
+						logger.info("上送的数据:" + result);
+						JSONObject  jasonObject = JSONObject.fromObject(result.get("payParams"));
+						Map map1 = (Map)jasonObject;
+						html = EffersonPayService.createAutoFormHtml(result.get("payUrl"), map1, "UTF-8");
+						logger.info("跳支付页面的url="+result.get("payUrl"));
+						logger.info("跳支付页面的参数="+map1);
+						outString(response, html);
 						break;
 					default:
 						break;
@@ -1640,7 +1732,7 @@ public class GateWayController extends BaseAction {
 	 * @param request
 	 * @param response
 	 * @throws Exception
-	 */
+	 *//*
 	@RequestMapping(value = "sd_notifyUrl")
 	public void sdnotifyUrl(HttpServletResponse response, HttpServletRequest request) {
 
@@ -1733,7 +1825,7 @@ public class GateWayController extends BaseAction {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
-	}
+	}*/
 
 	/**
 	 * 聚佰宝网关异步响应信息
@@ -2869,10 +2961,280 @@ public class GateWayController extends BaseAction {
 		}
 	}
 
-/*	public static void main(String[] args) {
-		Double dd = Double.parseDouble("10045.55") * 100;
-		System.out.println(dd);
-		Integer ii = dd.intValue();
-		System.out.println(ii);
-	}*/
+	/**
+	 * 杉德网关异步响应信息
+	 * 
+	 * @param request
+	 * @param response
+	 * @throws Exception
+	 */
+	@RequestMapping(value = "SD_notifyUrl")
+	public void SDnotifyUrl(HttpServletResponse response, HttpServletRequest request) {
+		log.info("杉德异步通知来了");
+		Map<String, String> result = new HashMap<String, String>();
+		String tradeData=request.getParameter("tradeData");
+		JSONObject jsonObject=JSONObject.fromObject(tradeData);
+		
+		String orderId=jsonObject.getString("orderId");//订单号
+		String status=jsonObject.getString("result");//支付成功标记,S：成功,F：失败,U：交易不确定
+		logger.info("tradeData==="+tradeData);
+		logger.info("orderId==="+orderId);
+		logger.info("status==="+status);
+		try {
+			if (orderId!= null&&orderId!=""&&status!= null&&status!= "") {
+				response.getWriter().write("success");
+				
+				OriginalOrderInfo originalInfo = null;
+				if (orderId!= null && orderId!= "") {
+					originalInfo = gateWayService.getOriginOrderInfos(orderId);
+				}
+				logger.info("杉德网关支付异步订单数据:" + JSON.toJSON(originalInfo));
+				
+				// 订单信息
+				PmsAppTransInfo pmsAppTransInfo = pmsAppTransInfoService.searchOrderInfo(originalInfo.getOrderId());
+				if (pmsAppTransInfo != null) {
+					logger.info("回调订单信息数据：" + JSON.toJSON(pmsAppTransInfo));
+					if (!"0".equals(pmsAppTransInfo.getStatus())) {
+						logger.info("订单表信息" + pmsAppTransInfo);
+						result.put("v_oid", originalInfo.getOrderId());
+						result.put("v_txnAmt", originalInfo.getOrderAmount());
+						result.put("v_code", "00");
+						result.put("v_attach", originalInfo.getAttach());
+						result.put("v_mid", originalInfo.getPid());
+						result.put("v_time", UtilDate.getTXDateTime());
+						if ("S".equals(status)) {
+							result.put("v_status", "0000");
+							result.put("v_msg", "支付成功");
+						} else if("F".equals(status)){
+							result.put("v_status", "1001");
+							result.put("v_msg", "支付失败");
+						}
+						ChannleMerchantConfigKey keyinfo = gateWayService.getChannelConfigKey(originalInfo.getPid());
+						// 获取商户秘钥
+						String key = keyinfo.getMerchantkey();
+						GateWayQueryResponseEntity gatewey = (GateWayQueryResponseEntity) BeanToMapUtil
+								.convertMap(GateWayQueryResponseEntity.class, result);
+						// 修改订单状态
+						gateWayService.otherInvoke(gatewey);
+
+						// 生成签名
+						String sign = SignatureUtil.getSign(beanToMap(gatewey), key, log);
+						result.put("v_sign", sign);
+
+						logger.info("异步之前的参数：" + result);
+						ConsumeResponseEntity consumeResponseEntity = (ConsumeResponseEntity) BeanToMapUtil
+								.convertMap(ConsumeResponseEntity.class, result);
+						Bean2QueryStrUtil bean2Util = new Bean2QueryStrUtil();
+						logger.info("异步给下游传的数据参数：" + bean2Util.bean2QueryStr(consumeResponseEntity));
+						String html = HttpClientUtil.post(originalInfo.getBgUrl(),
+								bean2Util.bean2QueryStr(consumeResponseEntity));
+						logger.info("下游返回状态" + html);
+						JSONObject ob = JSONObject.fromObject(html);
+						Iterator it = ob.keys();
+						Map<String, String> map = new HashMap<>();
+						while (it.hasNext()) {
+							String keys = (String) it.next();
+							if (keys.equals("success")) {
+								String value = ob.getString(keys);
+								logger.info("异步回馈的结果:" + "\t" + value);
+								map.put("success", value);
+							}
+						}
+						if (!map.get("success").equals("true")) {
+
+							logger.info("启动线程进行异步通知");
+							// 启线程进行异步通知
+							ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(),
+									bean2Util.bean2QueryStr(consumeResponseEntity)));
+						}
+
+						logger.info("向下游 发送数据成功");
+
+					} else {
+						logger.error("回调的参数为空!");
+						result.put("v_code", "15");
+						result.put("v_msg", "请求失败");
+					}
+					outString(response, gson.toJson(result));
+				}
+			}else {
+				response.getWriter().write("fail");
+			}
+
+		} catch (Exception e) {
+			logger.info("杉德异步回调异常:" + e);
+			e.printStackTrace();
+		}
+	}
+	
+	
+	/**
+	 * 杉德网关同步响应信息
+	 * 
+	 * @param request
+	 * @param response
+	 * @throws Exception
+	 */
+	@RequestMapping(value = "SD_returnUrl")
+	public void SDreturnUrl(HttpServletResponse response, HttpServletRequest request) {
+		try {
+			logger.info("##########杉德同步响应开始##############");
+			String orderId=request.getParameter("orderId");
+			
+			logger.info("杉德同步数据返回参数="+orderId);
+			OriginalOrderInfo originalInfo = null;
+			if (orderId != null && orderId != "") {
+				originalInfo = this.gateWayService.getOriginOrderInfos(orderId);
+			}
+			logger.info("订单数据:" + JSON.toJSON(originalInfo));
+			Bean2QueryStrUtil queryUtil = new Bean2QueryStrUtil();
+			logger.info("下游的同步地址" + originalInfo.getPageUrl());
+			TreeMap<String, String> result = new TreeMap<String, String>();
+			String params = "";
+			if (!StringUtils.isEmpty(orderId)) {
+				ChannleMerchantConfigKey keyinfo = gateWayService.getChannelConfigKey(originalInfo.getPid());
+				// 获取商户秘钥
+				String key = keyinfo.getMerchantkey();
+				result.put("v_oid", originalInfo.getOrderId());
+				result.put("v_txnAmt", originalInfo.getOrderAmount());
+				result.put("v_code", "00");
+				result.put("v_msg", "请求成功");
+				result.put("v_time", originalInfo.getOrderTime());
+				result.put("v_mid", originalInfo.getPid());
+				ConsumeResponseEntity consume = (ConsumeResponseEntity) BeanToMapUtil
+						.convertMap(ConsumeResponseEntity.class, result);
+				String sign = SignatureUtil.getSign(beanToMap(consume), key, log);
+				result.put("v_sign", sign);
+				params = HttpURLConection.parseParams(result);
+				logger.info("给下游同步的数据:" + params);
+				request.getSession();
+				try {
+					// 给下游手动返回支付结果
+					if (originalInfo.getPageUrl().indexOf("?") == -1) {
+
+						String path = originalInfo.getPageUrl() + "?" + params;
+						logger.info("pageUrl 商户页面 重定向：" + path);
+
+						response.sendRedirect(path.replace(" ", ""));
+					} else {
+						logger.info("pageUrl 商户页面 重定向：" + originalInfo.getPageUrl());
+						String path = originalInfo.getPageUrl() + "&" + params;
+						logger.info("pageUrl 商户页面 重定向：" + path);
+						response.sendRedirect(path.replace(" ", ""));
+					}
+				} catch (Exception e) {
+					// TODO: handle exception
+					e.printStackTrace();
+				}
+
+			} else {
+				logger.info("没有收到杉德网关的同步数据");
+				// outString(response, str);
+			}
+
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+	}
+	
+	
+	/**
+	 * 杉德网关支付订单查询
+	 * @param response
+	 * @param request
+	 * @throws IOException 
+	 */
+	@RequestMapping(value="SDSearch")
+	public Map<String, String> SDSearch(HttpServletResponse response,HttpServletRequest request) throws IOException {
+	    log.info("杉德订单查询来了！");	
+	    Map<String, String> map=new HashMap<>();
+	    
+	    String merId = request.getParameter("merId");
+	    String orderId = request.getParameter("orderId");
+	    log.info("商户号："+merId);
+	    log.info("订单号："+orderId);
+	    
+	    try {
+	    	PmsBusinessPos pmsBusinessPos = gateWayService.selectKey(merId);
+	    	
+	    	JSONObject jsonObj = new JSONObject();
+			jsonObj.put("merId", pmsBusinessPos.getBusinessnum());//商户号
+			jsonObj.put("orderId", orderId);//订单号
+			//支付提交
+			String url = "https://payment.newpaypay.com/sdk/json.do";
+			String key=pmsBusinessPos.getKek();
+			String tradeData = jsonObj.toString();
+			String md5Src = tradeData + "&" + key;  //md5源串
+			byte[] bTradeSign = SMd5.md5(md5Src.getBytes("UTF-8")); //md5加密
+			String tradeSign = ByteUtil.bytes2HexStr(bTradeSign);//字节转字符,如0x1234AB -> “1234AB”
+			
+			List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+			nvps.add(new BasicNameValuePair("tradeId","payOrderQuery"));
+			nvps.add(new BasicNameValuePair("ver","1.0"));
+			nvps.add(new BasicNameValuePair("tradeData",tradeData));
+			nvps.add(new BasicNameValuePair("tradeSign",tradeSign));
+			
+			String responses = HttpClientUtils.doPost(url,nvps,HTTP.UTF_8).trim();
+			log.info("杉德网关支付查询响应信息：" + responses);
+			JSONObject jsonResps = JSONObject.fromObject(responses);
+			String backData = jsonResps.getString("backData");
+			String status = jsonResps.getString("status");
+			String info = jsonResps.getString("info");
+			
+			JSONObject jsonResp = JSONObject.fromObject(backData);
+			String result = jsonResp.getString("result");
+			String merIds = jsonResp.getString("merId");
+			String payOrderId = jsonResp.getString("payOrderId");
+			String orderIds = jsonResp.getString("orderId");
+			String amount = jsonResp.getString("amount");
+			String payTime = jsonResp.getString("payTime");
+			String reserve = jsonResp.getString("reserve");
+			String bankJournal = jsonResp.getString("bankJournal");
+			
+			log.info("杉德---订单状态="+result);
+			log.info("杉德---查询订单商户号="+merIds);
+			log.info("杉德---查询订单号="+orderIds);
+			log.info("杉德---查询订单金额="+amount);
+			log.info("杉德---查询订单成功时间="+payTime);
+			log.info("杉德---查询订单平台订单号="+payOrderId);
+			log.info("杉德---查询订单商户保留信息="+reserve);
+			log.info("杉德---查询订单银行流水号="+bankJournal);
+			
+			if(status.equals("0000")) {
+				map.put("v_code", "00");
+				map.put("v_msg", "交易成功");
+			}else {
+				map.put("v_code", "15");
+				map.put("v_msg", info);
+			}
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return map;
+	}
+	
+	/*
+	 * 当前时间加一天
+	 */
+	public static String dateonePlus(String date){		
+		 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");  
+	        Date dt = null;
+			try {
+				dt = sdf.parse(date);
+			} catch (ParseException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}  
+	        Calendar rightNow = Calendar.getInstance();  
+	        rightNow.setTime(dt);  
+	  
+	        rightNow.add(Calendar.DAY_OF_MONTH, +1);  
+	        Date dt1 = rightNow.getTime();  
+	        String reStr = sdf.format(dt1); 
+		return reStr;
+	}
+	
 }
