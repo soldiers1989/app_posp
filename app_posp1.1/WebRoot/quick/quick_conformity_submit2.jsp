@@ -28,7 +28,8 @@ String basePath = request.getScheme()+"://"+request.getServerName()+":"+request.
 	</form>
 </center>
 <script type="text/javascript">
-	  $("#from").submit();  
+	 // $("#from").submit();  
+	  document.getElementById("from").submit();
 </script>
 </body>
 
