@@ -1,6 +1,5 @@
 package xdt.service.impl;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.DataOutputStream;
@@ -36,11 +35,9 @@ import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
-import java.util.Map.Entry;
 
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
-import net.sf.json.xml.XMLSerializer;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -50,7 +47,6 @@ import javax.annotation.Resource;
 import javax.ws.rs.core.MultivaluedMap;
 
 import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.fileupload.disk.DiskFileItem;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.codehaus.jackson.map.ObjectMapper;
@@ -59,20 +55,17 @@ import org.jdom.Element;
 import org.jdom.input.SAXBuilder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.multipart.commons.CommonsMultipartFile;
 import org.xml.sax.InputSource;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.TypeReference;
 import com.capinfo.crypt.Md5;
-import com.huateng.xmapper.common.IConstants;
+import com.epaylinks.common.Tool;
 import com.ielpm.mer.sdk.secret.Secret;
 import com.ielpm.mer.sdk.secret.SecretConfig;
 import com.innovatepay.merchsdk.DefaultChinaInPayClient;
 import com.innovatepay.merchsdk.request.ChinaInPayOnePayRequest;
 import com.innovatepay.merchsdk.request.ChinaInPayRequest;
 import com.innovatepay.merchsdk.request.ChinaInPaySameNamePayRequest;
-import com.innovatepay.merchsdk.request.ChinaInPaySameNameSearchRequest;
-import com.innovatepay.merchsdk.request.ChinaInPaySearchOrder;
 import com.innovatepay.merchsdk.util.Base64Util;
 import com.kspay.MD5Util;
 import com.kspay.cert.CertVerify;
@@ -104,12 +97,10 @@ import xdt.dto.cx.CXThread;
 import xdt.dto.cx.CXUtil;
 import xdt.dto.gateway.util.GopayUtils;
 import xdt.dto.hfb.Desede;
-import xdt.dto.hfb.HFBPayResponse;
 import xdt.dto.hfb.HeepayClient2;
 import xdt.dto.hfb.HfbUtil;
 import xdt.dto.hj.HJPayRequest;
 import xdt.dto.hj.HJPayResponse;
-import xdt.dto.hj.HJThread;
 import xdt.dto.hj.HJThread2;
 import xdt.dto.hj.HJUtil;
 import xdt.dto.hlb.HLBUtil;
@@ -134,9 +125,7 @@ import xdt.dto.pay.EncryptUtil;
 import xdt.dto.pay.PayUtil;
 import xdt.dto.pay.SignUtil;
 import xdt.dto.pay.TokenRes;
-import xdt.dto.quickPay.entity.ConsumeResponseEntity;
 import xdt.dto.scanCode.util.ResponseUtil;
-import xdt.dto.scanCode.util.ScanCodeUtil;
 import xdt.dto.scanCode.util.WFBThread;
 import xdt.dto.scanCode.util.YSZFThread;
 import xdt.dto.sxf.Base64Utils;
@@ -156,7 +145,7 @@ import xdt.dto.transfer_accounts.util.CJThread;
 import xdt.dto.transfer_accounts.util.DsfData;
 import xdt.dto.transfer_accounts.util.DsfService;
 import xdt.dto.transfer_accounts.util.JHJThread;
-import xdt.dto.yb.YBThread;
+import xdt.dto.transfer_accounts.util.YPLThread;
 import xdt.dto.yb.YBUtil;
 import xdt.dto.yb.YeepayService;
 import xdt.dto.yf.BatchDisburseApplyReq;
@@ -166,11 +155,8 @@ import xdt.dto.yf.DisburseClientUtil;
 import xdt.dto.yf.DoYf;
 import xdt.dto.yf.FileDownReq;
 import xdt.dto.yf.GsonUtil;
-import xdt.dto.yf.JaxbUtils;
 import xdt.dto.yf.MD5FileUtil;
 import xdt.dto.yf.OnePayRequest;
-import xdt.dto.yf.PayReq;
-import xdt.dto.yf.PayRequest;
 import xdt.dto.yf.PostUtils;
 import xdt.dto.yf.RefundChequeResultDownReq;
 import xdt.dto.yf.RefundChequeResultDownRsp;
@@ -183,10 +169,8 @@ import xdt.model.PmsBusinessPos;
 import xdt.model.PmsDaifuMerchantInfo;
 import xdt.model.PmsMerchantInfo;
 import xdt.model.PmsWeixinMerchartInfo;
-import xdt.model.PospRouteInfo;
 import xdt.quickpay.daikou.util.HttpUtils;
 import xdt.quickpay.jbb.entity.xml.util.CertKeyUtil;
-import xdt.quickpay.jbb.entity.xml.util.DateUtil;
 import xdt.quickpay.jbb.entity.xml.y2e.Y2e0010Res;
 import xdt.quickpay.jbb.entity.xml.y2e.Y2e1010Req;
 import xdt.quickpay.jbb.util.EctonRSAUtils;
@@ -215,7 +199,6 @@ import xdt.util.JsdsUtil;
 import xdt.util.JsonUtil;
 import xdt.util.RSAUtil;
 import xdt.util.UtilDate;
-import xdt.util.XMLUtil;
 import xdt.util.XmlToMap;
 import xdt.util.utils.MD5Utils;
 import xdt.util.utils.RSAUtils;
@@ -4969,121 +4952,121 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	 */
 	public Map<String, String> yplPay(DaifuRequestEntity payRequest, Map<String, String> result,
 			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
-//		String termNo = "";//终端编号
-//		String terminalPwd ="";
-//		if("EC180911YL002".equals(pmsBusinessPos.getBusinessnum())) {
-//			termNo = "36249402";//终端编号
-//			terminalPwd = "02c6b15bd2557935740c642c2b24e777";//终端密码   经过MD5加密后得到
-//		}else {
-//			//新商户号添加新的
-//		}
-//		String partner = pmsBusinessPos.getBusinessnum();//商户号
-//		String md5Key = "yuiwbdueu8394939896481kfweievmjf20509";//MD5 KEY   不变
-//		String wsdl ="http://www.epaylinks.cn/EpayDsf/services/EpayDsfService";//生产地址 不变
-//		String nameSpace ="http://webservice.dsf.epaylinks.cn"; // 不变 
-//		DecimalFormat df = new DecimalFormat("######0");
-//		BigDecimal payAmt=new BigDecimal(payRequest.getV_amount()).setScale(2, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100));
-//		DsfData data = new DsfData(termNo, terminalPwd, partner, md5Key, wsdl, nameSpace);
-//		data.setRequestHeaderParam("trackNo",payRequest.getV_batch_no());
-//		data.setRequestBodyParam("payCardNo",pmsBusinessPos.getDepartmentnum());
-//		data.setRequestBodyParam("payPass", Tool.desEncrypt("123aliangshuai",data.getTerminalPwd()));//支付密码 每次设置尽量不变
-//		data.setRequestBodyParam("payType", "1");
-//		data.setRequestBodyParam("toFlag", "0");
-//		data.setRequestBodyParam("orderNo", payRequest.getV_batch_no());
-//		data.setRequestBodyParam("amount", df.format(payAmt.doubleValue()));
-//		data.setRequestBodyParam("recCur", "CNY");
-//		data.setRequestBodyParam("tradeDate", Tool.dateToString(new Date(), "yyyyMMdd"));
-//		data.setRequestBodyParam("bankCode",payRequest.getV_bankNumber());
-//		data.setRequestBodyParam("bankAccType", "00");
-//		data.setRequestBodyParam("bankAccprop",payRequest.getV_cardType()==null?"0":payRequest.getV_cardType());
-//		data.setRequestBodyParam("bankAccNo",payRequest.getV_cardNo());
-//		data.setRequestBodyParam("bankAccName", payRequest.getV_realName());
-//		data.setRequestBodyParam("mobNo",payRequest.getV_phone());
-//		data.setRequestBodyParam("summary","单笔代付到银行");
-//	
-////		data.setRequestBodyParam("payWay", "0");
-//
-//		DsfService service = new DsfService();
-//		Map<String, String> maps =new HashMap<>();
-//		try{
-//			Map<String,Object> map= service.callWs(data,"8010","payToBank","payToBank");
-//			this.printSortedMap((SortedMap<String,Object>)map.get("header"),maps);
-//			this.printSortedMap((SortedMap<String,Object>)map.get("dataBody"),maps);
-//			log.info("代付返回参数："+JSON.toJSONString(maps));
-//			result.put("v_mid", payRequest.getV_mid());
-//			result.put("v_batch_no", payRequest.getV_batch_no());
-//			result.put("v_code", "00");
-//			result.put("v_msg", "请求成功");
-//			result.put("v_sum_amount",payRequest.getV_sum_amount());
-//			result.put("v_amount", payRequest.getV_amount());
-//			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-//			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-//			result.put("v_type", payRequest.getV_type());
-//			if(!maps.isEmpty()) {
-//				String respCode=maps.get("respCode");
-//				if("2001".equals(respCode)||"2002".equals(respCode)||"2003".equals(respCode)||"2004".equals(respCode)||"2005".equals(respCode)||"2006".equals(respCode)
-//					||"2007".equals(respCode)||"2008".equals(respCode)||"2009".equals(respCode)||"2010".equals(respCode)||"2011".equals(respCode)||"2012".equals(respCode)
-//					||"2013".equals(respCode)||"2014".equals(respCode)||"2015".equals(respCode)||"2016".equals(respCode)||"2019".equals(respCode)||"2051".equals(respCode)
-//					||"2052".equals(respCode)||"2057".equals(respCode)||"2053".equals(respCode)||"2054".equals(respCode)||"2056".equals(respCode)||"2060".equals(respCode)
-//					||"2061".equals(respCode)||"2055".equals(respCode)||"2101".equals(respCode)||"2102".equals(respCode)||"2103".equals(respCode)
-//					||"2104".equals(respCode)||"2105".equals(respCode)||"2106".equals(respCode)||"2107".equals(respCode)||"2108".equals(respCode)
-//					||"2109".equals(respCode)||"2110".equals(respCode)||"2111".equals(respCode)||"2112".equals(respCode)||"2113".equals(respCode)||"2114".equals(respCode)
-//					||"2115".equals(respCode)||"2172".equals(respCode)||"2203".equals(respCode)||"2299".equals(respCode)||"2305".equals(respCode)||"2322".equals(respCode)
-//					||"2327".equals(respCode)||"2325".equals(respCode)) {
-//					//主动查询
-//					log.info("易票联代付失败");
-//					result.put("v_code", "01");
-//					result.put("v_msg",maps.get("respMsg"));
-//					UpdateDaifu(payRequest.getV_batch_no(), "01");
-//					//补款
-//					Map<String, String> mapU =new HashMap<>();
-//					mapU.put("machId",payRequest.getV_mid());
-//					mapU.put("payMoney",Double.parseDouble(payRequest.getV_sum_amount())*100+Double.parseDouble(merchantinfo.getPoundage())*100+"");
-//					int nus =0;
-//					if("0".equals(payRequest.getV_type())) {
-//						nus =updataPay(mapU);
-//					}else if("1".equals(payRequest.getV_type())){
-//						nus =updataPayT1(mapU);
-//					}
-//		 			if(nus==1) {
-//		 				log.info("易票联代付补款成功");
-//		 				DaifuRequestEntity entity =new DaifuRequestEntity();
-//		 				entity.setV_mid(payRequest.getV_mid());
-//		 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
-//		 				entity.setV_amount(payRequest.getV_sum_amount());
-//		 				entity.setV_sum_amount(payRequest.getV_sum_amount());
-//		 				entity.setV_identity(payRequest.getV_identity());
-//		 				entity.setV_cardNo(payRequest.getV_cardNo());
-//		 				entity.setV_city(payRequest.getV_city());
-//		 				entity.setV_province(payRequest.getV_province());
-//		 				entity.setV_type(payRequest.getV_type());
-//		 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
-//						int ii =add(entity, merchantinfo, result, "00");
-//						log.info("易票联补款订单状态："+ii);
-//		 			}
-//				}else {
-//					log.info("主动查询之前");
-//					ThreadPool.executor(new YPLThread(this, payRequest, merchantinfo));
-//					
-//				}
-//			}else {
-//				//不确定,主动查询
-//				ThreadPool.executor(new YPLThread(this, payRequest, merchantinfo));
-//			}
-//			
-//		}catch(Exception e){
-//			e.printStackTrace();
-//			result.put("v_mid", payRequest.getV_mid());
-//			result.put("v_batch_no", payRequest.getV_batch_no());
-//			result.put("v_code", "00");
-//			result.put("v_msg", "请求成功");
-//			result.put("v_sum_amount",payRequest.getV_sum_amount());
-//			result.put("v_amount", payRequest.getV_amount());
-//			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
-//			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
-//			result.put("v_type", payRequest.getV_type());
-//		}
-//		
+		String termNo = "";//终端编号
+		String terminalPwd ="";
+		if("EC180911YL002".equals(pmsBusinessPos.getBusinessnum())) {
+			termNo = "36249402";//终端编号
+			terminalPwd = "02c6b15bd2557935740c642c2b24e777";//终端密码   经过MD5加密后得到
+		}else {
+			//新商户号添加新的
+		}
+		String partner = pmsBusinessPos.getBusinessnum();//商户号
+		String md5Key = "yuiwbdueu8394939896481kfweievmjf20509";//MD5 KEY   不变
+		String wsdl ="http://www.epaylinks.cn/EpayDsf/services/EpayDsfService";//生产地址 不变
+		String nameSpace ="http://webservice.dsf.epaylinks.cn"; // 不变 
+		DecimalFormat df = new DecimalFormat("######0");
+		BigDecimal payAmt=new BigDecimal(payRequest.getV_amount()).setScale(2, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100));
+		DsfData data = new DsfData(termNo, terminalPwd, partner, md5Key, wsdl, nameSpace);
+		data.setRequestHeaderParam("trackNo",payRequest.getV_batch_no());
+		data.setRequestBodyParam("payCardNo",pmsBusinessPos.getDepartmentnum());
+		data.setRequestBodyParam("payPass", Tool.desEncrypt("123aliangshuai",data.getTerminalPwd()));//支付密码 每次设置尽量不变
+		data.setRequestBodyParam("payType", "1");
+		data.setRequestBodyParam("toFlag", "0");
+		data.setRequestBodyParam("orderNo", payRequest.getV_batch_no());
+		data.setRequestBodyParam("amount", df.format(payAmt.doubleValue()));
+		data.setRequestBodyParam("recCur", "CNY");
+		data.setRequestBodyParam("tradeDate", Tool.dateToString(new Date(), "yyyyMMdd"));
+		data.setRequestBodyParam("bankCode",payRequest.getV_bankNumber());
+		data.setRequestBodyParam("bankAccType", "00");
+		data.setRequestBodyParam("bankAccprop",payRequest.getV_cardType()==null?"0":payRequest.getV_cardType());
+		data.setRequestBodyParam("bankAccNo",payRequest.getV_cardNo());
+		data.setRequestBodyParam("bankAccName", payRequest.getV_realName());
+		data.setRequestBodyParam("mobNo",payRequest.getV_phone());
+		data.setRequestBodyParam("summary","单笔代付到银行");
+	
+//		data.setRequestBodyParam("payWay", "0");
+
+		DsfService service = new DsfService();
+		Map<String, String> maps =new HashMap<>();
+		try{
+			Map<String,Object> map= service.callWs(data,"8010","payToBank","payToBank");
+			this.printSortedMap((SortedMap<String,Object>)map.get("header"),maps);
+			this.printSortedMap((SortedMap<String,Object>)map.get("dataBody"),maps);
+			log.info("代付返回参数："+JSON.toJSONString(maps));
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount",payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+			if(!maps.isEmpty()) {
+				String respCode=maps.get("respCode");
+				if("2001".equals(respCode)||"2002".equals(respCode)||"2003".equals(respCode)||"2004".equals(respCode)||"2005".equals(respCode)||"2006".equals(respCode)
+					||"2007".equals(respCode)||"2008".equals(respCode)||"2009".equals(respCode)||"2010".equals(respCode)||"2011".equals(respCode)||"2012".equals(respCode)
+					||"2013".equals(respCode)||"2014".equals(respCode)||"2015".equals(respCode)||"2016".equals(respCode)||"2019".equals(respCode)||"2051".equals(respCode)
+					||"2052".equals(respCode)||"2057".equals(respCode)||"2053".equals(respCode)||"2054".equals(respCode)||"2056".equals(respCode)||"2060".equals(respCode)
+					||"2061".equals(respCode)||"2055".equals(respCode)||"2101".equals(respCode)||"2102".equals(respCode)||"2103".equals(respCode)
+					||"2104".equals(respCode)||"2105".equals(respCode)||"2106".equals(respCode)||"2107".equals(respCode)||"2108".equals(respCode)
+					||"2109".equals(respCode)||"2110".equals(respCode)||"2111".equals(respCode)||"2112".equals(respCode)||"2113".equals(respCode)||"2114".equals(respCode)
+					||"2115".equals(respCode)||"2172".equals(respCode)||"2203".equals(respCode)||"2299".equals(respCode)||"2305".equals(respCode)||"2322".equals(respCode)
+					||"2327".equals(respCode)||"2325".equals(respCode)) {
+					//主动查询
+					log.info("易票联代付失败");
+					result.put("v_code", "01");
+					result.put("v_msg",maps.get("respMsg"));
+					UpdateDaifu(payRequest.getV_batch_no(), "01");
+					//补款
+					Map<String, String> mapU =new HashMap<>();
+					mapU.put("machId",payRequest.getV_mid());
+					mapU.put("payMoney",Double.parseDouble(payRequest.getV_sum_amount())*100+Double.parseDouble(merchantinfo.getPoundage())*100+"");
+					int nus =0;
+					if("0".equals(payRequest.getV_type())) {
+						nus =updataPay(mapU);
+					}else if("1".equals(payRequest.getV_type())){
+						nus =updataPayT1(mapU);
+					}
+		 			if(nus==1) {
+		 				log.info("易票联代付补款成功");
+		 				DaifuRequestEntity entity =new DaifuRequestEntity();
+		 				entity.setV_mid(payRequest.getV_mid());
+		 				entity.setV_batch_no(payRequest.getV_batch_no()+"/A");
+		 				entity.setV_amount(payRequest.getV_sum_amount());
+		 				entity.setV_sum_amount(payRequest.getV_sum_amount());
+		 				entity.setV_identity(payRequest.getV_identity());
+		 				entity.setV_cardNo(payRequest.getV_cardNo());
+		 				entity.setV_city(payRequest.getV_city());
+		 				entity.setV_province(payRequest.getV_province());
+		 				entity.setV_type(payRequest.getV_type());
+		 				entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
+						int ii =add(entity, merchantinfo, result, "00");
+						log.info("易票联补款订单状态："+ii);
+		 			}
+				}else {
+					log.info("主动查询之前");
+					ThreadPool.executor(new YPLThread(this, payRequest, merchantinfo));
+					
+				}
+			}else {
+				//不确定,主动查询
+				ThreadPool.executor(new YPLThread(this, payRequest, merchantinfo));
+			}
+			
+		}catch(Exception e){
+			e.printStackTrace();
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount",payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+		}
+		
 		return result;	
 	}
 	//易票联格式化返回数据

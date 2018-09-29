@@ -1,17 +1,11 @@
 package xdt.test;
 
-import java.io.IOException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
-import javax.annotation.Resource;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServlet;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.TypeReference;
@@ -19,9 +13,6 @@ import com.yeepay.g3.facade.yop.ca.dto.DigitalEnvelopeDTO;
 import com.yeepay.g3.facade.yop.ca.enums.CertTypeEnum;
 import com.yeepay.g3.frame.yop.ca.DigitalEnvelopeUtils;
 import com.yeepay.g3.sdk.yop.utils.InternalConfig;
-
-import xdt.service.ITotalPayService;
-import xdt.service.impl.TotalPayServiceImpl;
 
 public class YbJUnitTest {
 
