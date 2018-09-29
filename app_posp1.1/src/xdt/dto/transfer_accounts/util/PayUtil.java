@@ -13,4 +13,5 @@ public class PayUtil {
 	public static final String hjNotifyUrl=BaseUtil.url+"/totalPayController/hjNotifyUrl.action";//汇聚代付异步
 	public static final String yytNotifyUrl=BaseUtil.url+"/totalPayController/yytNotifyUrl.action";//银盈通代付异步
 	public static final String gfbNotifyUrl=BaseUtil.url+"/totalPayController/gfbNotifyUrl.action";//国付宝代付异步
+	public static final String sdNotifyUrl=BaseUtil.url+"/totalPayController/SDNotifyUrl.action";//杉德代付异步
 }
