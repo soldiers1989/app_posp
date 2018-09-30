@@ -26,7 +26,10 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
 import org.apache.commons.lang.StringUtils;
+import org.apache.http.NameValuePair;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.protocol.HTTP;
 import org.apache.log4j.Logger;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -41,6 +44,9 @@ import net.sf.json.JSONObject;
 import xdt.dto.quickPay.entity.ConsumeResponseEntity;
 import xdt.dto.quickPay.util.MbUtilThread;
 import xdt.dto.scanCode.entity.ScanCodeResponseEntity;
+import xdt.dto.sd.ByteUtil;
+import xdt.dto.sd.HttpClientUtils;
+import xdt.dto.sd.SMd5;
 import xdt.dto.transfer_accounts.entity.BalanceRequestEntity;
 import xdt.dto.transfer_accounts.entity.BalanceResponseEntity;
 import xdt.dto.transfer_accounts.entity.DaifuQueryRequestEntity;
@@ -65,9 +71,11 @@ import xdt.schedule.ThreadPool;
 import xdt.service.IClientCollectionPayService;
 import xdt.service.IGateWayService;
 import xdt.service.ITotalPayService;
+import xdt.service.impl.TotalPayServiceImpl;
 import xdt.util.BeanToMapUtil;
 import xdt.util.DSDES;
 import xdt.util.HttpURLConection;
+import xdt.util.UtilDate;
 import xdt.util.XmlToMap;
 
 /**
@@ -2290,5 +2298,229 @@ public class TotalPayController extends BaseAction {
 						// TODO Auto-generated catch block
 						e.printStackTrace();
 					}
+	}
+	
+	/**
+	 * 杉德代付异步通知
+	 * @param response
+	 * @param request
+	 * @throws IOException 
+	 */
+	@RequestMapping(value="SDNotifyUrl")
+	public void SDNotifyUrl(HttpServletResponse response,HttpServletRequest request) throws IOException {
+	    log.info("杉德代付异步来了！");	  
+	    String result111 = request.getParameter("result");
+	    log.info("111代付异步返回的状态信息111："+result111);
+	    
+	    String tradeData=request.getParameter("tradeData");
+        JSONObject jsonObject=JSONObject.fromObject(tradeData);
+        String orderId=jsonObject.getString("orderId");//订单号
+		String result=jsonObject.getString("result");//支付成功标记,S：成功,F：失败,U：交易不确定
+		log.info("杉德代付异步返回的订单号："+orderId);
+		log.info("杉德代付异步返回的状态信息："+result);
+		
+		Map<String, String> maps =new HashMap<>();
+		request.getSession();
+		ChannleMerchantConfigKey keyinfo=new ChannleMerchantConfigKey();
+		
+		OriginalOrderInfo originalInfo=null;
+		request.getSession();
+		if(result!=""&&result!=null&&orderId!=""&&orderId!=null) {	
+		    response.getWriter().write("success");
+		    
+			PmsDaifuMerchantInfo pmsDaifuMerchantInfo =new PmsDaifuMerchantInfo();
+			pmsDaifuMerchantInfo.setBatchNo(orderId);
+			List<PmsDaifuMerchantInfo> pmsDaifuMerchantInfos =service.selectDaifu(pmsDaifuMerchantInfo);
+			String type="";
+			if("D0".equals(pmsDaifuMerchantInfos.get(0).getRemarks())){
+				type="0";
+			}else if("T1".equals(pmsDaifuMerchantInfos.get(0).getRemarks())) {
+				type="1";
+			}
+								
+			try {
+					originalInfo  = this.gateWayService.getOriginOrderInfos(orderId);
+					keyinfo = clientCollectionPayService.getChannelConfigKey(originalInfo.getPid());
+				} catch (Exception e) {
+					
+					e.printStackTrace();
+				}
+				log.info("杉德代付原始订单数据:" + JSON.toJSON(originalInfo));			
+				log.info("杉德代付下游的异步地址" + originalInfo.getBgUrl());
+				
+				maps.put("v_mid", originalInfo.getPid());
+				maps.put("v_oid", originalInfo.getOrderId());
+				maps.put("v_txnAmt", originalInfo.getOrderAmount());
+				maps.put("v_attach", originalInfo.getAttach());
+				maps.put("v_code", "00");
+				maps.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+
+				
+				if("S".equals(result)) {
+					maps.put("v_status", "0000");
+					maps.put("v_msg", "代付成功");
+					try {
+						service.UpdateDaifu(originalInfo.getOrderId(), "00");
+						log.info("杉德代付修改成功代付状态成功！");
+					} catch (Exception e) {
+						log.info("杉德代付修改成功代付状态异常："+e);
+						e.printStackTrace();
+					}
+				}else if("F".equals(result)){
+						maps.put("v_status", "1001");
+						maps.put("v_msg", "代付失败");
+						try {
+							service.UpdateDaifu(originalInfo.getOrderId(), "02");
+							log.info("杉德代付修改失败代付状态成功！");
+						} catch (Exception e) {
+							log.info("杉德代付修改失败代付状态异常："+e);
+							e.printStackTrace();
+						}
+						Map<String, String> map =new HashMap<>();
+						map.put("machId",originalInfo.getPid());
+						map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))+"");
+						int nus =0;
+						if("0".equals(type)) {
+							nus =service.updataPay(map);
+						}else if("1".equals(type)){
+							nus =service.updataPayT1(map);
+						}
+						if(nus==1) {
+							log.info("杉德代付补款成功");
+							DaifuRequestEntity entity =new DaifuRequestEntity();
+			 				entity.setV_mid(pmsDaifuMerchantInfos.get(0).getMercId());
+			 				entity.setV_batch_no(pmsDaifuMerchantInfos.get(0).getBatchNo()+"/A");
+			 				entity.setV_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+			 				entity.setV_sum_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+			 				entity.setV_identity(pmsDaifuMerchantInfos.get(0).getIdentity());
+			 				entity.setV_cardNo(pmsDaifuMerchantInfos.get(0).getCardno());
+			 				entity.setV_city(pmsDaifuMerchantInfos.get(0).getCity());
+			 				entity.setV_province(pmsDaifuMerchantInfos.get(0).getProvince());
+			 				entity.setV_type(type);
+			 				entity.setV_pmsBankNo(pmsDaifuMerchantInfos.get(0).getPmsbankno());
+			 				PmsMerchantInfo merchantinfo =new PmsMerchantInfo();
+							int ii;
+							try {
+								ii = service.add(entity, merchantinfo, maps, "00");
+								log.info("杉德代付补款订单状态："+ii);
+							} catch (Exception e) {
+								log.info("杉德代付补款状态异常："+e);
+								e.printStackTrace();
+							}
+							
+						}else {
+							log.info("杉德代付补款失败");
+						}
+					}
+					
+				ScanCodeResponseEntity consume = (ScanCodeResponseEntity) BeanToMapUtil
+						.convertMap(ScanCodeResponseEntity.class, maps);
+				String signs = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
+				maps.put("v_sign", signs);
+				String params = HttpURLConection.parseParams(maps);
+				log.info("杉德代付给下游同步的数据:" + params);
+				String html;
+				try {
+					html = HttpClientUtil.post(originalInfo.getBgUrl(), params);
+					logger.info("下游返回状态" + html);
+					JSONObject ob = JSONObject.fromObject(html);
+					Iterator it = ob.keys();
+					Map<String, String> resp = new HashMap<>();
+					while (it.hasNext()) {
+						String keys = (String) it.next();
+						if (keys.equals("success")) {
+							String value = ob.getString(keys);
+							logger.info("异步回馈的结果:"+ value);
+							resp.put("success", value);
+						}
+					}
+					if (!resp.get("success").equals("true")) {
+						
+						logger.info("启动线程进行异步通知");
+						// 启线程进行异步通知
+						ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(), params));
+						logger.info("杉德代付向下游 发送数据成功");
+					}
+				} catch (IOException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+		}else {
+			response.getWriter().write("fail");
+		}
+	}
+	
+	
+	/**
+	 * 杉德代付订单查询
+	 * @param response
+	 * @param request
+	 * @throws IOException 
+	 */
+	@RequestMapping(value="SDSearch")
+	public Map<String, String> SDSearch(HttpServletResponse response,HttpServletRequest request) throws IOException {
+	    log.info("杉德代付查询来了！");	
+	    Map<String, String> map=new HashMap<>();
+	    
+	    String merId = request.getParameter("merId");
+	    String orderId = request.getParameter("orderId");
+	    log.info("商户号："+merId);
+	    log.info("订单号："+orderId);
+	    
+	    try {
+	    	PmsBusinessPos pmsBusinessPos = service.selectKey(merId);
+	    	
+	    	JSONObject jsonObj = new JSONObject();
+			jsonObj.put("merId", pmsBusinessPos.getBusinessnum());//商户号
+			jsonObj.put("orderId", orderId);//订单号
+			//支付提交
+			String url = "https://payment.newpaypay.com/sdk/json.do";
+			String key=pmsBusinessPos.getKek();
+			String tradeData = jsonObj.toString();
+			String md5Src = tradeData + "&" + key;  //md5源串
+			byte[] bTradeSign = SMd5.md5(md5Src.getBytes("UTF-8")); //md5加密
+			String tradeSign = ByteUtil.bytes2HexStr(bTradeSign);//字节转字符,如0x1234AB -> “1234AB”
+			
+			List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+			nvps.add(new BasicNameValuePair("tradeId","cashOrderQuery"));
+			nvps.add(new BasicNameValuePair("ver","1.0"));
+			nvps.add(new BasicNameValuePair("tradeData",tradeData));
+			nvps.add(new BasicNameValuePair("tradeSign",tradeSign));
+			
+			String responses = HttpClientUtils.doPost(url,nvps,HTTP.UTF_8).trim();
+			log.info("杉德代付查询响应信息：" + responses);
+			JSONObject jsonResps = JSONObject.fromObject(responses);
+			String backData = jsonResps.getString("backData");
+			String status = jsonResps.getString("status");
+			String info = jsonResps.getString("info");
+			
+			JSONObject jsonResp = JSONObject.fromObject(backData);
+			String result = jsonResp.getString("result");
+			String merIds = jsonResp.getString("merId");
+			String cashOrderId = jsonResp.getString("cashOrderId");
+			String orderIds = jsonResp.getString("orderId");
+			String amount = jsonResp.getString("amount");
+			String cashTime = jsonResp.getString("cashTime");
+			
+			log.info("杉德代付查询订单状态="+result);
+			log.info("杉德代付查询订单商户号="+merIds);
+			log.info("杉德代付查询订单号="+orderIds);
+			log.info("杉德代付查询订单金额="+amount);
+			log.info("杉德代付查询订单成功时间="+cashTime);
+			log.info("杉德代付查询订单平台订单号="+cashOrderId);
+			
+			if(status.equals("0000")) {
+				map.put("v_code", "00");
+				map.put("v_msg", "交易成功");
+			}else {
+				map.put("v_code", "15");
+				map.put("v_msg", info);
+			}
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return map;
 	}
 }
