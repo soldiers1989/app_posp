@@ -48,6 +48,8 @@ import javax.ws.rs.core.MultivaluedMap;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.http.NameValuePair;
+import org.apache.http.message.BasicNameValuePair;
 import org.apache.log4j.Logger;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.jdom.Document;
@@ -128,6 +130,9 @@ import xdt.dto.pay.TokenRes;
 import xdt.dto.scanCode.util.ResponseUtil;
 import xdt.dto.scanCode.util.WFBThread;
 import xdt.dto.scanCode.util.YSZFThread;
+import xdt.dto.sd.ByteUtil;
+import xdt.dto.sd.HttpClientUtils;
+import xdt.dto.sd.SMd5;
 import xdt.dto.sxf.Base64Utils;
 import xdt.dto.sxf.DESUtils;
 import xdt.dto.sxf.DF1003Request;
@@ -625,6 +630,10 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 							break;
 						case "TL":
 							tlPay(payRequest, result, merchantinfo, pmsBusinessPos);
+							break;
+						case "SD":
+							SDPay(payRequest, result, merchantinfo, pmsBusinessPos);
+							break;
 						default:
 							result.put("v_code", "17");
 							result.put("v_msg", "未找到路由,请联系运营");
@@ -5903,5 +5912,107 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		return result;
 		        
 	}
+	
+	public Map<String, String> SDPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos)throws Exception
+		  {
+		    this.log.info("=======杉德代付进来了======");
+		    try
+		    {
+		      net.sf.json.JSONObject jsonObj = new net.sf.json.JSONObject();
+		      jsonObj.put("merId", pmsBusinessPos.getBusinessnum());
+		      jsonObj.put("orderId", payRequest.getV_batch_no());
+		      jsonObj.put("amount", payRequest.getV_amount());
+		      jsonObj.put("bankId", payRequest.getV_bankCode());
+		      if ((payRequest.getV_cardType() == null) || (payRequest.getV_cardType() == "") || (payRequest.getV_cardType().equals("1"))) {
+		        jsonObj.put("toPublic", "0");
+		      } else {
+		        jsonObj.put("toPublic", "1");
+		      }
+		      jsonObj.put("bankBranch", payRequest.getV_bankname());
+		      jsonObj.put("cnapsCode", payRequest.getV_pmsBankNo());
+		      jsonObj.put("bankAcc", payRequest.getV_cardNo());
+		      jsonObj.put("bankAccName", payRequest.getV_realName());
+		      jsonObj.put("bankProvince", payRequest.getV_province());
+		      jsonObj.put("bankCity", payRequest.getV_city());
+		      jsonObj.put("notifyUrl", xdt.dto.transfer_accounts.util.PayUtil.sdNotifyUrl);
+		      
+		      String url = "https://payment.newpaypay.com/sdk/json.do";
+		      String key = pmsBusinessPos.getKek();
+		      
+		      String tradeData = jsonObj.toString();
+		      String md5Src = tradeData + "&" + key;
+		      byte[] bTradeSign = SMd5.md5(md5Src.getBytes("UTF-8"));
+		      String tradeSign = ByteUtil.bytes2HexStr(bTradeSign);
+		      
+		      List<NameValuePair> nvps = new ArrayList();
+		      nvps.add(new BasicNameValuePair("tradeId", "cashGateway"));
+		      nvps.add(new BasicNameValuePair("ver", "1.0"));
+		      nvps.add(new BasicNameValuePair("tradeData", tradeData));
+		      nvps.add(new BasicNameValuePair("tradeSign", tradeSign));
+		      
+		      String response = HttpClientUtils.doPost(url, nvps, "UTF-8").trim();
+		      this.log.info("杉德代付响应信息：" + response);
+		      
+		      result.put("v_mid", payRequest.getV_mid());
+		      result.put("v_batch_no", payRequest.getV_batch_no());
+		      result.put("v_sum_amount", payRequest.getV_sum_amount());
+		      result.put("v_amount", payRequest.getV_amount());
+		      result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+		      result.put("v_time", UtilDate.getDateFormatter());
+		      result.put("v_type", payRequest.getV_type());
+		      result.put("v_code", "00");
+		      result.put("v_msg", "请求成功");
+		      if ((response != null) && (response != ""))
+		      {
+		        net.sf.json.JSONObject jsonResp = net.sf.json.JSONObject.fromObject(response);
+		        String status = jsonResp.getString("status");
+		        String info = jsonResp.getString("info");
+		        if (!status.equals("0000"))
+		        {
+		          this.log.info("杉德代付请求失败：" + info);
+		          result.put("v_code", "15");
+		          result.put("v_msg", "请求失败，" + info);
+		          UpdateDaifu(payRequest.getV_batch_no(), "02");
+		          Map<String, String> map = new HashMap();
+		          map.put("machId", payRequest.getV_mid());
+		          Double amount=Double.parseDouble(payRequest.getV_sum_amount()) + Double.parseDouble(merchantinfo.getPoundage());
+		          map.put("payMoney",amount.toString());
+		          int nus = 0;
+		          if ("0".equals(payRequest.getV_type())) {
+		            nus = updataPay(map);
+		          } else if ("1".equals(payRequest.getV_type())) {
+		            nus = updataPayT1(map);
+		          }
+		          if (nus == 1)
+		          {
+		            this.log.info("杉德代付补款成功");
+		            DaifuRequestEntity entity = new DaifuRequestEntity();
+		            entity.setV_mid(payRequest.getV_mid());
+		            entity.setV_batch_no(payRequest.getV_batch_no() + "/A");
+		            entity.setV_amount(payRequest.getV_sum_amount());
+		            entity.setV_sum_amount(payRequest.getV_sum_amount());
+		            entity.setV_identity(payRequest.getV_identity());
+		            entity.setV_cardNo(payRequest.getV_cardNo());
+		            entity.setV_city(payRequest.getV_city());
+		            entity.setV_province(payRequest.getV_province());
+		            entity.setV_type(payRequest.getV_type());
+		            entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
+		            int ii = add(entity, merchantinfo, result, "00");
+		            this.log.info("杉德补款订单状态：" + ii);
+		          }
+		        }
+		      }
+		      else
+		      {
+		        this.log.info("杉德代付无响应信息");
+		      }
+		    }
+		    catch (Exception e)
+		    {
+		      e.printStackTrace();
+		    }
+		    return result;
+		  }
 	
 }
