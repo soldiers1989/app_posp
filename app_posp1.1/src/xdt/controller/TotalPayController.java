@@ -2492,8 +2492,7 @@ public class TotalPayController extends BaseAction {
 			JSONObject jsonResps = JSONObject.fromObject(responses);
 			String backData = jsonResps.getString("backData");
 			String status = jsonResps.getString("status");
-			String info = jsonResps.getString("info");
-			
+			String info = jsonResps.getString("info");		
 			JSONObject jsonResp = JSONObject.fromObject(backData);
 			String result = jsonResp.getString("result");
 			String merIds = jsonResp.getString("merId");

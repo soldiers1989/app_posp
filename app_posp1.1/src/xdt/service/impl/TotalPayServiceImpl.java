@@ -5999,7 +5999,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		            entity.setV_type(payRequest.getV_type());
 		            entity.setV_pmsBankNo(payRequest.getV_pmsBankNo());
 		            int ii = add(entity, merchantinfo, result, "00");
-		            this.log.info("杉德补款订单状态：" + ii);
+		            this.log.info("杉德补款订单添加条数：" + ii);
 		          }
 		        }
 		      }
