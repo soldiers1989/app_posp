@@ -3,13 +3,19 @@ package xdt.service.impl;
 import com.alibaba.fastjson.JSON;
 import com.kspay.MD5Util;
 
+import net.sf.json.JSONObject;
 
 import java.io.File;
 import java.io.UnsupportedEncodingException;
 import java.math.BigDecimal;
+import java.net.InetAddress;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.text.DecimalFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -19,6 +25,9 @@ import java.util.TreeMap;
 
 import javax.annotation.Resource;
 import org.apache.commons.lang.StringUtils;
+import org.apache.http.NameValuePair;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.protocol.HTTP;
 import org.apache.log4j.Logger;
 import org.springframework.stereotype.Service;
 import xdt.dao.ChannleMerchantConfigKeyDao;
@@ -30,6 +39,9 @@ import xdt.dao.IPmsMerchantInfoDao;
 import xdt.dao.IPospTransInfoDAO;
 import xdt.dao.OriginalOrderInfoDao;
 import xdt.dto.BaseUtil;
+import xdt.dto.sd.ByteUtil;
+import xdt.dto.sd.HttpClientUtils;
+import xdt.dto.sd.SMd5;
 import xdt.model.AppRateConfig;
 import xdt.model.ChannleMerchantConfigKey;
 import xdt.model.OriginalOrderInfo;
@@ -636,6 +648,75 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 						case "YPL":
 							retMap =yplQuickPay(originalinfo, pmsBusinessPos, retMap);
 							break;
+						case "SD":
+							logger.info("#############杉德快捷支付处理 开始#############");
+							JSONObject jsonObj = new JSONObject();
+							jsonObj.put("merId", pmsBusinessPos.getBusinessnum());//62010002给下面商户测试
+							jsonObj.put("orderId", originalinfo.getV_oid());//订单号
+							jsonObj.put("goods", originalinfo.getV_productDesc());//商品描述
+							jsonObj.put("amount", originalinfo.getV_txnAmt());//付款金额，单位元，精确到小数点后二位
+							String format1=new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+							jsonObj.put("expTime", dateonePlus(format1));//订单有效截止时间，当前时间加一天
+							jsonObj.put("notifyUrl", BaseUtil.url+"/conformity/SDKJ_notifyUrl.action");//支付成功回调地址
+							jsonObj.put("pageUrl", BaseUtil.url+"/conformity/SDKJ_returnUrl.action?orderId="+originalinfo.getV_oid());//支付成功返回商户页面
+							jsonObj.put("reserve", originalinfo.getV_attach());//通知商户支付结果时，返回给商户
+							jsonObj.put("extendInfo", "");//订单扩展信息,建议空串
+							jsonObj.put("payMode", "03");//支付模式,03:快捷支付模式
+							jsonObj.put("creditType", "2");//允许支付的卡类型
+							String userid=new SimpleDateFormat("ddHHmmss").format(new Date());
+							logger.info("userid=" + userid);
+							jsonObj.put("userId", userid);//商户平台用户
+							jsonObj.put("clientIp", InetAddress.getLocalHost().getHostAddress());//商户平台用户登录ip
+							
+							String tradeData=jsonObj.toString();
+							String md5Src = tradeData + "&" + pmsBusinessPos.getKek();  //md5源串
+							byte[] bTradeSign = SMd5.md5(md5Src.getBytes("UTF-8")); //md5加密
+							String tradeSign = ByteUtil.bytes2HexStr(bTradeSign);//字节转字符,如0x1234AB -> “1234AB”
+							
+							List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+							nvps.add(new BasicNameValuePair("tradeId","payGateway"));
+							nvps.add(new BasicNameValuePair("ver","1.0"));
+							nvps.add(new BasicNameValuePair("tradeData",tradeData));//交易数据
+							nvps.add(new BasicNameValuePair("tradeSign",tradeSign));//交易签名
+							String surl = "https://payment.newpaypay.com/sdk/json.do";
+							String responses = HttpClientUtils.doPost(surl,nvps,HTTP.UTF_8).trim();
+							logger.info("响应信息=" + responses);
+							if(responses!=null&&responses!="") {
+								//返回数据处理
+								JSONObject jsonResp = JSONObject.fromObject(responses);
+								String backSign = jsonResp.getString("backSign");
+								String info = jsonResp.getString("info");
+								String status = jsonResp.getString("status");
+								logger.info("backSign="+backSign);
+								logger.info("info="+info);
+								logger.info("status="+status);
+								
+								if(status!=null&&!status.equals("0000")){
+									logger.info("请求失败");
+									retMap.put("v_msg","请求失败("+info+")");
+									retMap.put("v_code","15");
+									return retMap;
+								}
+								
+								//有数据
+								JSONObject backData = jsonResp.getJSONObject("backData");
+								md5Src = backData + "&" + pmsBusinessPos.getKek();
+								logger.info("md5Src: " + md5Src);
+								boolean check = SMd5.md5Verify(md5Src, backSign);
+								if(!check){
+									logger.info("查询验签名失败");
+									retMap.put("v_msg","请求失败");
+									retMap.put("v_code","15");
+									return retMap;
+								}
+								
+								logger.info("查询验签名成功");
+								String payUrl = backData.getString("payUrl");	
+								retMap.put("payUrl", payUrl);
+								retMap.put("v_code", "00");
+								retMap.put("v_msg", "请求成功");
+							}
+							break;
 						default:							
 							break;
 						}
@@ -992,5 +1073,26 @@ public class ConformityQucikPayServiceImpl extends BaseServiceImpl implements IC
 		}
 		retMap.putAll(paramsMap);
 		return retMap;
+	}
+	
+	/*
+	 * 当前时间加一天
+	 */
+	public static String dateonePlus(String date){		
+		 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");  
+	        Date dt = null;
+			try {
+				dt = sdf.parse(date);
+			} catch (ParseException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}  
+	        Calendar rightNow = Calendar.getInstance();  
+	        rightNow.setTime(dt);  
+	  
+	        rightNow.add(Calendar.DAY_OF_MONTH, +1);  
+	        Date dt1 = rightNow.getTime();  
+	        String reStr = sdf.format(dt1); 
+		return reStr;
 	}
 }

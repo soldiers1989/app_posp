@@ -25,10 +25,14 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 
+import xdt.dto.gateway.entity.GateWayQueryResponseEntity;
+import xdt.dto.quickPay.entity.ConsumeResponseEntity;
 import xdt.dto.quickPay.entity.QueryRequestEntity;
 import xdt.dto.quickPay.entity.QueryResponseEntity;
+import xdt.dto.quickPay.util.MbUtilThread;
 import xdt.model.ChannleMerchantConfigKey;
 import xdt.model.OriginalOrderInfo;
+import xdt.model.PmsAppTransInfo;
 import xdt.model.PmsBusinessPos;
 import xdt.quickpay.conformityQucikPay.entity.CallbackEntity;
 import xdt.quickpay.conformityQucikPay.entity.ConformityQucikPayRequestEntity;
@@ -41,10 +45,12 @@ import xdt.quickpay.conformityQucikPay.util.EffersonPayService;
 import xdt.quickpay.conformityQucikPay.util.HttpClientUtil;
 import xdt.quickpay.conformityQucikPay.util.RSAUtils;
 import xdt.quickpay.conformityQucikPay.util.SignatureUtil;
+import xdt.quickpay.hengfeng.util.Bean2QueryStrUtil;
 import xdt.schedule.ThreadPool;
 import xdt.service.IConformityQucikPayService;
 import xdt.util.HttpURLConection;
 import xdt.util.RSAUtil;
+import xdt.util.UtilDate;
 
 @Controller
 @RequestMapping("conformity")
@@ -193,6 +199,14 @@ public class ConformityQucikPayController extends BaseAction {
 					request.getSession();
 		            url = "/app_posp/quick/quick_conformity_submit2.jsp?pay_url=" + (String)result.get("pay_url") + "&" + (String)result.get("cipherData");
 		            response.sendRedirect(url);
+					break;
+				case "SD"://杉德
+					logger.info("************************杉德----快捷支付----请求开始");
+					result.remove("v_msg");
+					result.remove("v_code");
+					url = result.get("payUrl");
+					logger.info("杉德快捷上送的数据:" + url);
+					response.sendRedirect(url.replace(" ", " "));
 					break;
 				default:						
 					break;
@@ -1385,6 +1399,176 @@ public class ConformityQucikPayController extends BaseAction {
 				// outString(response, str);
 			} catch (Exception e) {
 				logger.info("易票联异步回调异常:" + e);
+				e.printStackTrace();
+			}
+		}
+		
+		
+		/**
+		 * 杉德快捷异步响应信息
+		 * 
+		 * @param request
+		 * @param response
+		 * @throws Exception
+		 */
+		@RequestMapping(value = "SDKJ_notifyUrl")
+		public void SDnotifyUrl(HttpServletResponse response, HttpServletRequest request) {
+			logger.info("杉德异步通知来了");
+			Map<String, String> result = new HashMap<String, String>();
+			String tradeData=request.getParameter("tradeData");
+			JSONObject jsonObject=JSONObject.fromObject(tradeData);
+			
+			String orderId=jsonObject.getString("orderId");//订单号
+			String status=jsonObject.getString("result");//支付成功标记,S：成功,F：失败,U：交易不确定
+			logger.info("tradeData==="+tradeData);
+			logger.info("orderId==="+orderId);
+			logger.info("status==="+status);
+			try {
+				if (orderId!= null&&orderId!=""&&status!= null&&status!= "") {
+					response.getWriter().write("success");
+					
+					OriginalOrderInfo originalInfo = null;
+					if (orderId != null && orderId != "") {
+						originalInfo = conformityService.getOriginOrderInfo(orderId);
+					}
+					logger.info("杉德支付异步订单数据:" + JSON.toJSON(originalInfo));
+					
+					result.put("v_mid", originalInfo.getPid());
+					result.put("v_oid", originalInfo.getOrderId());
+					result.put("v_txnAmt", originalInfo.getOrderAmount());
+					result.put("v_time", originalInfo.getOrderTime());
+					result.put("v_code", "00");
+					result.put("v_msg", "请求成功");
+					result.put("v_attach", originalInfo.getAttach());
+					if ("S".equals(status)) {
+						result.put("v_payStatus", "0000");
+						result.put("v_payMsg", "支付成功");
+						
+						int i = conformityService.updatePmsMerchantInfo(originalInfo);
+						if (i > 0) {
+							logger.info("杉德*****实时入金完成");
+						} else {
+							logger.info("杉德*****实时入金失败");
+						}
+					} else if("F".equals(status)){
+						result.put("v_payStatus", "1001");
+						result.put("v_payMsg", "支付失败");
+					}
+					ChannleMerchantConfigKey keyinfo =conformityService.getChannelConfigKey(originalInfo.getPid());
+					// 获取商户秘钥
+					String key = keyinfo.getMerchantkey();
+					CallbackEntity consume = (CallbackEntity ) BeanToMapUtil
+							.convertMap(CallbackEntity.class, result);
+					// 修改订单状态
+					conformityService.otherInvoke(orderId,result.get("v_payStatus"));
+					logger.info("杉德支付异步回调地址:" + originalInfo.getBgUrl());
+					// 生成签名
+					String sign = SignatureUtil.getSign(beanToMap(consume), key);
+					result.put("v_sign", sign);
+
+					logger.info("杉德支付异步封装前参数：" + result);
+					CallbackEntity consumeResponseEntity = (CallbackEntity) BeanToMapUtil
+							.convertMap(CallbackEntity.class, result);
+					logger.info("杉德支付异步封装后参数：" + HttpClientUtil.bean2QueryStr(consumeResponseEntity));
+					String html = HttpClientUtil.post(originalInfo.getBgUrl(),
+							HttpClientUtil.bean2QueryStr(consumeResponseEntity));
+					logger.info("杉德支付下游响应信息:" + html);
+					JSONObject ob = JSONObject.fromObject(html);
+					Iterator it = ob.keys();
+					Map<String, String> map = new HashMap<>();
+					while (it.hasNext()) {
+						String keys = (String) it.next();
+						if (keys.equals("success")) {
+							String value = ob.getString(keys);
+							logger.info("杉德支付回馈的结果:" + "\t" + value);
+							map.put("success", value);
+						}
+					}
+					if (!map.get("success").equals("true")) {
+
+						logger.info("杉德支付启动线程进行异步通知");
+						// 启线程进行异步通知
+						ThreadPool.executor(new QuickPayThread(originalInfo.getBgUrl(), HttpClientUtil.bean2QueryStr(consumeResponseEntity)));
+					}
+					logger.info("杉德支付向下游 发送数据成功");
+
+				} else {
+					outString(response, "fail");
+					logger.error("回调的参数为空!");
+					result.put("v_code", "15");
+					result.put("v_msg", "请求失败");
+				}
+			} catch (Exception e) {
+				logger.info("杉德异步回调异常:" + e);
+				e.printStackTrace();
+			}
+		}
+		
+		
+		/**
+		 * 杉德快捷同步响应信息
+		 * 
+		 * @param request
+		 * @param response
+		 * @throws Exception
+		 */
+		@RequestMapping(value = "SDKJ_returnUrl")
+		public void SDreturnUrl(HttpServletResponse response, HttpServletRequest request) {
+			try {
+				logger.info("##########杉德同步响应开始##############");
+				String orderId=request.getParameter("orderId");
+				
+				logger.info("杉德同步数据返回参数="+orderId);
+				OriginalOrderInfo originalInfo = null;
+				if (orderId != null && orderId != "") {
+					originalInfo = conformityService.getOriginOrderInfo(orderId);
+				}
+				logger.info("杉德同步原始订单数据:" + JSON.toJSON(originalInfo));
+				logger.info("杉德给下游的同步地址" + originalInfo.getPageUrl());
+				TreeMap<String, String> result = new TreeMap<String, String>();
+				String params = "";
+				if (!StringUtils.isEmpty(orderId)) {
+					ChannleMerchantConfigKey keyinfo = conformityService.getChannelConfigKey(originalInfo.getPid());
+					// 获取商户秘钥
+					String key = keyinfo.getMerchantkey();
+					result.put("v_oid", originalInfo.getOrderId());
+					result.put("v_txnAmt", originalInfo.getOrderAmount());
+					result.put("v_code", "00");
+					result.put("v_msg", "请求成功");
+					result.put("v_time", originalInfo.getOrderTime());
+					result.put("v_mid", originalInfo.getPid());
+					ConformityQucikPayResponseEntity consumeResponseEntity = (ConformityQucikPayResponseEntity) BeanToMapUtil
+							.convertMap(ConformityQucikPayResponseEntity.class, result);
+					String sign = SignatureUtil.getSign(beanToMap(consumeResponseEntity), key);
+					result.put("v_sign", sign);
+					params = HttpClientUtil.parseParams(result);
+					logger.info("杉德同步给下游的数据:" + params);
+					request.getSession();
+					try {
+						// 给下游手动返回支付结果
+						if (originalInfo.getPageUrl().indexOf("?") == -1) {
+
+							String path = originalInfo.getPageUrl() + "?" + params;
+							logger.info("杉德 重定向地址：" + path);
+
+							response.sendRedirect(path.replace(" ", ""));
+						} else {
+							logger.info("杉德 重定向地址：" + originalInfo.getPageUrl());
+							String path = originalInfo.getPageUrl() + "&" + params;
+							logger.info("杉德 重定向地址：" + path);
+							response.sendRedirect(path.replace(" ", ""));
+						}
+					} catch (Exception e) {
+						// TODO: handle exception
+						e.printStackTrace();
+					}
+				} else {
+					logger.info("没有收到杉德快捷的同步数据");
+					// outString(response, str);
+				}
+
+			} catch (Exception e) {
+				// TODO: handle exception
 				e.printStackTrace();
 			}
 		}
