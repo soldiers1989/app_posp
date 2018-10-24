@@ -1694,7 +1694,12 @@ public class ScanCodeController extends BaseAction{
 				Map<String,String> maps =service.getScanCodeQuick(query);
 				try {
 					if(!"0000".equals(maps.get("v_status"))) {
-						int i =service.UpdatePmsMerchantInfo1(originalInfo,0.8);
+						int i =0;
+						if("10043073125".equals(originalInfo.getPid())){
+							i =service.UpdatePmsMerchantInfo1(originalInfo,0.9);
+						}else {
+							i =service.UpdatePmsMerchantInfo1(originalInfo,0.8);
+						}
 						if(i==1) {
 							log.info("易势支付入金成功");
 						}else {
