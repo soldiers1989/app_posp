@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
+import javax.servlet.http.HttpServletRequest;
+
 import xdt.dto.pay.PayRequest;
 import xdt.dto.tfb.WxPayApplyRequest;
 import xdt.dto.transfer_accounts.entity.BalanceRequestEntity;
@@ -110,4 +112,12 @@ public interface ITotalPayService {
 	public Map<String, String> cjQuick(String merId, String batchNo);
 
 	Map<String, String> yplQuick(String merId, String batchNo);
+
+	public Map<String, String> chPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos)throws Exception;
+	public Map<String, String> ttfPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos)throws Exception;
+	public Map<String, String> yttQuick(String merId, String batchNo)throws Exception;
+	public Map<String, String> sdQuick(String merId, String batchNo) throws IOException;
+	public Map<String, String> chQuick(String merId, String batchNo) throws IOException;
 }

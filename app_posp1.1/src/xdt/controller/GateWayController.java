@@ -41,6 +41,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.MultivaluedMap;
 
+import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.http.NameValuePair;
@@ -73,7 +74,15 @@ import cn.com.sandpay.cashier.sdk.SandpayResponseHead;
 import cn.com.sandpay.cashier.sdk.util.CertUtil;
 import cn.com.sandpay.cashier.sdk.util.DateUtil;
 import cn.com.sandpay.cashier.sdk.util.SandpayConstants;
+import fosun.sumpay.merchant.integration.request.Request;
+import fosun.sumpay.merchant.integration.service.SignService;
+import fosun.sumpay.merchant.integration.service.SignServiceImpl;
+import fosun.sumpay.merchant.integration.service.SumpayService;
+import fosun.sumpay.merchant.integration.service.SumpayServiceImpl;
+import fosun.sumpay.merchant.integration.util.Constant;
+import fosun.sumpay.merchant.integration.util.ParamUtil;
 import net.sf.json.JSONObject;
+import sun.misc.BASE64Decoder;
 import xdt.dao.IPayBankInfoDao;
 import xdt.dto.BaseUtil;
 import xdt.dto.gateway.common.SampleConstant;
@@ -83,6 +92,8 @@ import xdt.dto.gateway.entity.GateWayRequestEntity;
 import xdt.dto.gateway.entity.GateWayResponseEntity;
 import xdt.dto.gateway.entity.GatrWayGefundEntity;
 import xdt.dto.gateway.util.GopayUtils;
+import xdt.dto.gateway.util.HttpClient4Utils;
+import xdt.dto.gateway.util.ParamUtils;
 import xdt.dto.hfb.HfbUtil;
 import xdt.dto.hfb.HttpsUtil;
 import xdt.dto.hj.HJResponse;
@@ -1107,10 +1118,148 @@ public class GateWayController extends BaseAction {
 							result.put("payParams", payParams);
 						}else {
 							logger.info("杉德网关支付无响应信息");
-							result.put("v_msg","请求失败(支付无响应)");
+							result.put("v_msg","请求失败，支付无响应");
 							result.put("v_code","15");
 							outString(response, JSON.toJSON(result));
 						}
+						break;
+					case "CH":
+						logger.info("#############传化网关支付处理 开始#############");
+						Map<String, Object> chMap = new LinkedHashMap<String, Object>();
+						chMap.put("appid", "2234001");// appid
+						//chMap.put("appid", "2235001");//易生活的APPID
+						String sjc=new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+						logger.info("时间戳="+sjc);
+						chMap.put("tf_timestamp",sjc);//时间戳
+						chMap.put("service_id", "tf56pay.gateway.bankPay");
+						chMap.put("sign_type", "MD5");
+						chMap.put("terminal", "PC");
+						chMap.put("fronturl", BaseUtil.url+"/gateWay/CH_returnUrl.action");//前台通知地址
+						chMap.put("backurl", BaseUtil.url+"/gateWay/CH_notifyUrl.action");//后台通知地址
+						chMap.put("subject", param.getV_productName());//商品名称
+						chMap.put("businesstype","网关和代付");//业务类型
+						chMap.put("kind","购物");//消费场景
+						chMap.put("description",param.getV_productDesc());//商品描述
+						chMap.put("businessnumber",param.getV_oid());//订单号
+						chMap.put("transactionamount",param.getV_txnAmt());//交易金额 元
+						chMap.put("toaccountnumber",busInfo.getBusinessnum());//收款方会员账号
+						chMap.put("bankcode", param.getV_bankAddr());//银行编号
+						if(param.getV_cardType().equals("0")) {
+						    chMap.put("bankaccounttype", "储蓄卡");//银行卡类型
+						}else {
+							chMap.put("bankaccounttype", "信用卡");
+						}						
+						chMap.put("accountproperty", "对私");//账户属性						
+						chMap.put("merchtonline", "0");// 0线上or1线下交易
+						
+//						String qqip=HttpClient4Utils.getRealIp();
+//						logger.info("外网IP="+qqip);
+						String qqip=InetAddress.getLocalHost().getHostAddress();
+						logger.info("内网IP="+qqip);
+						chMap.put("clientip", qqip);//客户端请求IP
+												
+						chMap.put("dog_sk", busInfo.getKek());
+						chMap.put("tf_sign", ParamUtils.map2MD5(chMap));// 签名
+						logger.info("签名="+chMap.get("tf_sign"));
+						chMap.remove("dog_sk");
+						
+						String curl = "https://openapi.tf56.com/service/api";
+						String resp = HttpClient4Utils.sendHttpRequest(curl,chMap,"UTF-8",true);
+						
+						if(resp!=null&&resp!="") {
+							//返回信息处理
+							JSONObject jsonResp = JSONObject.fromObject(resp);
+							logger.info("传话网关支付请求返回的信息="+jsonResp);
+							String code = jsonResp.getString("code");
+							String biz_code = jsonResp.getString("biz_code");
+							String biz_msg = jsonResp.getString("biz_msg");
+							if(code.equals("GP_00")&&biz_code.equals("GPBIZ_00")) {
+								logger.info("传化网关支付请求成功");								
+								String datas = jsonResp.getString("data");
+								JSONObject jsonResps = JSONObject.fromObject(datas);
+								String htmldata = jsonResps.getString("htmldata");
+								String htmldatas = URLDecoder.decode(htmldata, "UTF-8");
+								logger.info("htmldatas1==="+htmldatas);
+								BASE64Decoder decoder = new BASE64Decoder();
+								String htmlss=new String(decoder.decodeBuffer(htmldatas), "UTF-8");
+								logger.info("htmldatas2==="+htmlss);
+								result.put("html",htmlss.toString());								
+							}else {
+								logger.info("传化网关支付请求失败,"+biz_msg);
+								result.put("v_msg","请求失败");
+								result.put("v_code","15");
+								outString(response, JSON.toJSON(result));
+							}
+						}else {
+							logger.info("传化网关支付无响应信息");
+							result.put("v_msg","请求失败，支付无响应");
+							result.put("v_code","15");
+							outString(response, JSON.toJSON(result));
+						}						
+						break;
+					case "TTF":
+						logger.info("#############商盟统统付网关支付处理 开始#############");
+						Map<String, String> sParaTemp = new HashMap<String, String>();
+						sParaTemp.put("app_id",busInfo.getBusinessnum());
+						sParaTemp.put("terminal_type", "web");//终端类型 pc:web   手机:wap
+						sParaTemp.put("version", "1.0");
+						sParaTemp.put("service", "fosun.sumpay.cashier.web.trade.order.apply");
+						sParaTemp.put("timestamp", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+						//sParaTemp.put("sign_type", "CERT");
+					
+						sParaTemp.put("mer_no", busInfo.getBusinessnum());
+						sParaTemp.put("trade_code", "T0002");//担保交易：T0001 ,即时交易：T0002 ,暂只支持即时交易
+						sParaTemp.put("user_id", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+						sParaTemp.put("order_no", param.getV_oid());
+						sParaTemp.put("order_time", param.getV_time());
+						sParaTemp.put("order_amount", param.getV_txnAmt());
+						sParaTemp.put("need_notify", "1");
+						sParaTemp.put("notify_url", BaseUtil.url+"/gateWay/SM_notifyUrl.action");
+						sParaTemp.put("need_return", "1");
+						sParaTemp.put("return_url", BaseUtil.url+"/gateWay/SM_returnUrl.action");
+						sParaTemp.put("currency", "CNY");
+						sParaTemp.put("goods_name", param.getV_productName());
+						sParaTemp.put("goods_num", param.getV_productNum());
+						sParaTemp.put("goods_type", "1");
+						/*sParaTemp.put("remark", "备注");
+						sParaTemp.put("extension", "扩展");*/
+						sParaTemp.put("attach", param.getV_attach());
+						
+						//建立请求
+						SumpayService ss = new SumpayServiceImpl();
+						Request request2 = new Request();
+						request2.setCharset("UTF-8");// 取jsp的请求编码
+						request2.setContent(JSON.toJSONString(sParaTemp)); // 业务参数的json字段
+						request2.setPassword("sumpay"); //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ 
+						logger.info("公钥路径="+request.getServletContext().getRealPath("") + "/yixuntiankong.pfx");
+						request2.setPrivateKeyPath(request.getServletContext().getRealPath("") + "/yixuntiankong.pfx");
+						request2.setPublicKeyPath(request.getServletContext().getRealPath("") + "/yixun.cer");
+						String Surl ="https://entrance.sumpay.cn/gateway.htm";
+						request2.setUrl(Surl);
+//						request2.setDomain("22qp179236.iask.in:41739");//请求方域名
+						request2.setDomain(InetAddress.getLocalHost().getHostAddress());
+						
+						Map<String, String> res = ss.execute(request2);
+						if(res.containsKey(Constant.RESP_CODE) && Constant.SUCCESS_RESP_CODE.equals(res.get(Constant.RESP_CODE))){
+						    StringBuffer sbHtml = new StringBuffer();
+						    sbHtml.append("<html><head><meta http-equiv=\"refresh\" content=\"5;http://maijie1349.com\"></head><body>");
+						    sbHtml.append(
+					            "<form id=\"sumpaysubmit\" name=\"sumpaysubmit\" action=\""
+					                      + res.get("redirect_url") + "\" method=\"POST\">");
+					        //submit按钮控件请不要含有name属性
+					        sbHtml.append("<input type=\"submit\" value=\"submit\" style=\"display:none;\"></form>");
+					        sbHtml.append("</body>");
+					        sbHtml.append("<script>document.forms['sumpaysubmit'].submit();</script>");
+					        sbHtml.append("</html>");
+					        logger.info("网关支付请求成功");
+					        result.put("html",sbHtml.toString());
+						}else{
+							logger.info("网关支付请求失败,"+res);
+							result.put("v_msg","请求失败");
+							result.put("v_code","15");
+							outString(response, JSON.toJSON(result));
+						}
+						
 						break;
 					default:
 						break;
@@ -1251,6 +1400,22 @@ public class GateWayController extends BaseAction {
 						html = EffersonPayService.createAutoFormHtml(result.get("payUrl"), map1, "UTF-8");
 						logger.info("跳支付页面的url="+result.get("payUrl"));
 						logger.info("跳支付页面的参数="+map1);
+						outString(response, html);
+						break;
+					case "CH":
+						logger.info("************************传化----网关支付----请求开始");
+						result.remove("v_msg");
+						result.remove("v_code");
+						logger.info("上送的数据:" + result);
+						html = result.get("html");
+						outString(response, html);
+						break;
+					case "TTF":
+						logger.info("************************----统统付----网关支付----请求开始");
+						result.remove("v_msg");
+						result.remove("v_code");
+						logger.info("上送的数据:" + result);
+						html = result.get("html");
 						outString(response, html);
 						break;
 					default:
@@ -3236,5 +3401,501 @@ public class GateWayController extends BaseAction {
 	        String reStr = sdf.format(dt1); 
 		return reStr;
 	}
+	
+	/**
+	 * 传化网关异步响应信息
+	 * 
+	 * @param request
+	 * @param response
+	 * @throws Exception
+	 */
+	@RequestMapping(value = "CH_notifyUrl")
+	public void CHnotifyUrl(HttpServletResponse response, HttpServletRequest request) {
+		log.info("传化网关支付异步通知来了");
+		Map<String, String> result = new HashMap<String, String>();
+		Map<String, String> resps = new HashMap<String, String>();
+		String status=request.getParameter("status");
+		logger.info("status==="+status);
+		String orderId=request.getParameter("businessnumber");
+		logger.info("orderId==="+orderId);
+		try {
+			if (orderId!= null&&orderId!=""&&status!= null&&status!= "") {
+				resps.put("result", "success");
+				resps.put("msg", "请求成功");
+				outString(response, JSON.toJSON(resps));
+				
+				OriginalOrderInfo originalInfo = null;
+				if (orderId!= null && orderId!= "") {
+					originalInfo = gateWayService.getOriginOrderInfos(orderId);
+				}
+				logger.info("传化网关支付异步订单数据:" + JSON.toJSON(originalInfo));
+				
+				// 订单信息
+				PmsAppTransInfo pmsAppTransInfo = pmsAppTransInfoService.searchOrderInfo(originalInfo.getOrderId());
+				if (pmsAppTransInfo != null) {
+					logger.info("回调订单信息数据：" + JSON.toJSON(pmsAppTransInfo));
+					if (!"0".equals(pmsAppTransInfo.getStatus())) {
+						logger.info("订单表信息" + pmsAppTransInfo);
+						result.put("v_oid", originalInfo.getOrderId());
+						result.put("v_txnAmt", originalInfo.getOrderAmount());
+						result.put("v_code", "00");
+						result.put("v_attach", originalInfo.getAttach());
+						result.put("v_mid", originalInfo.getPid());
+						result.put("v_time", UtilDate.getTXDateTime());
+						if ("成功".equals(status)) {
+							result.put("v_status", "0000");
+							result.put("v_msg", "支付成功");
+							
+							if ("0".equals(originalInfo.getPayType())) {
+								int i = gateWayService.UpdatePmsMerchantInfo(originalInfo,1.0);
+								if (i > 0) {
+									logger.info("*****实时入金完成");
+								} else {
+									logger.info("*****实时入金失败");
+								}
+							}
+							
+						} else if("失败".equals(status)){
+							result.put("v_status", "1001");
+							result.put("v_msg", "支付失败");
+						}
+						ChannleMerchantConfigKey keyinfo = gateWayService.getChannelConfigKey(originalInfo.getPid());
+						// 获取商户秘钥
+						String key = keyinfo.getMerchantkey();
+						GateWayQueryResponseEntity gatewey = (GateWayQueryResponseEntity) BeanToMapUtil
+								.convertMap(GateWayQueryResponseEntity.class, result);
+						// 修改订单状态
+						gateWayService.otherInvoke(gatewey);
+
+						// 生成签名
+						String sign = SignatureUtil.getSign(beanToMap(gatewey), key, log);
+						result.put("v_sign", sign);
+
+						logger.info("异步之前的参数：" + result);
+						ConsumeResponseEntity consumeResponseEntity = (ConsumeResponseEntity) BeanToMapUtil
+								.convertMap(ConsumeResponseEntity.class, result);
+						Bean2QueryStrUtil bean2Util = new Bean2QueryStrUtil();
+						logger.info("异步给下游传的数据参数：" + bean2Util.bean2QueryStr(consumeResponseEntity));
+						String html = HttpClientUtil.post(originalInfo.getBgUrl(),
+								bean2Util.bean2QueryStr(consumeResponseEntity));
+						logger.info("下游返回状态" + html);
+						JSONObject ob = JSONObject.fromObject(html);
+						Iterator it = ob.keys();
+						Map<String, String> map = new HashMap<>();
+						while (it.hasNext()) {
+							String keys = (String) it.next();
+							if (keys.equals("success")) {
+								String value = ob.getString(keys);
+								logger.info("异步回馈的结果:" + "\t" + value);
+								map.put("success", value);
+							}
+						}
+						if (!map.get("success").equals("true")) {
+
+							logger.info("启动线程进行异步通知");
+							// 启线程进行异步通知
+							ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(),
+									bean2Util.bean2QueryStr(consumeResponseEntity)));
+						}
+
+						logger.info("向下游 发送数据成功");
+
+					} else {
+						logger.error("订单数据status=0");
+						result.put("v_code", "15");
+						result.put("v_msg", "请求失败");
+					}
+					outString(response, gson.toJson(result));
+				}
+			}else {
+				logger.info("异步回调参数为空");
+				resps.put("result", "error");
+				resps.put("msg", "请求失败");
+				outString(response, JSON.toJSON(resps));
+			}
+
+		} catch (Exception e) {
+			logger.info("传化异步回调异常:" + e);
+			e.printStackTrace();
+		}
+	}
+	
+	
+	/**
+	 * 传化网关同步响应信息
+	 * 
+	 * @param request
+	 * @param response
+	 * @throws Exception
+	 */
+	@RequestMapping(value = "CH_returnUrl")
+	public void CHreturnUrl(HttpServletResponse response, HttpServletRequest request) {
+		try {
+			logger.info("##########传化同步响应开始##############");
+			String orderId=request.getParameter("businessnumber");
+			
+			logger.info("传化同步数据返回参数="+orderId);
+			OriginalOrderInfo originalInfo = null;
+			if (orderId != null && orderId != "") {
+				originalInfo = this.gateWayService.getOriginOrderInfos(orderId);
+			}
+			logger.info("订单数据:" + JSON.toJSON(originalInfo));
+			Bean2QueryStrUtil queryUtil = new Bean2QueryStrUtil();
+			logger.info("下游的同步地址" + originalInfo.getPageUrl());
+			TreeMap<String, String> result = new TreeMap<String, String>();
+			String params = "";
+			if (!StringUtils.isEmpty(orderId)) {
+				ChannleMerchantConfigKey keyinfo = gateWayService.getChannelConfigKey(originalInfo.getPid());
+				// 获取商户秘钥
+				String key = keyinfo.getMerchantkey();
+				result.put("v_oid", originalInfo.getOrderId());
+				result.put("v_txnAmt", originalInfo.getOrderAmount());
+				result.put("v_code", "00");
+				result.put("v_msg", "请求成功");
+				result.put("v_time", originalInfo.getOrderTime());
+				result.put("v_mid", originalInfo.getPid());
+				ConsumeResponseEntity consume = (ConsumeResponseEntity) BeanToMapUtil
+						.convertMap(ConsumeResponseEntity.class, result);
+				String sign = SignatureUtil.getSign(beanToMap(consume), key, log);
+				result.put("v_sign", sign);
+				params = HttpURLConection.parseParams(result);
+				logger.info("给下游同步的数据:" + params);
+				request.getSession();
+				try {
+					// 给下游手动返回支付结果
+					if (originalInfo.getPageUrl().indexOf("?") == -1) {
+
+						String path = originalInfo.getPageUrl() + "?" + params;
+						logger.info("pageUrl 商户页面 重定向：" + path);
+
+						response.sendRedirect(path.replace(" ", ""));
+					} else {
+						logger.info("pageUrl 商户页面 重定向：" + originalInfo.getPageUrl());
+						String path = originalInfo.getPageUrl() + "&" + params;
+						logger.info("pageUrl 商户页面 重定向：" + path);
+						response.sendRedirect(path.replace(" ", ""));
+					}
+				} catch (Exception e) {
+					// TODO: handle exception
+					e.printStackTrace();
+				}
+
+			} else {
+				logger.info("没有收到传化网关的同步数据");
+				// outString(response, str);
+			}
+
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+	}
+	
+	
+	/**
+	 * 传化网关支付订单查询
+	 * @param response
+	 * @param request
+	 * @throws IOException 
+	 */
+	@RequestMapping(value="CHSearch")
+	public Map<String, String> CHSearch(HttpServletResponse response,HttpServletRequest request) throws IOException {
+	    log.info("传化订单查询来了！");	
+	    Map<String, String> map=new HashMap<>();
+	    
+	    String merId = request.getParameter("merId");
+	    String orderId = request.getParameter("orderId");
+	    log.info("商户号："+merId);
+	    log.info("订单号："+orderId);
+	    
+	    try {
+	    	PmsBusinessPos pmsBusinessPos = gateWayService.selectKey(merId);
+	    	
+			Map<String, Object> chMap = new LinkedHashMap<String, Object>();
+			chMap.put("appid", pmsBusinessPos.getBusinessnum());// appid
+			chMap.put("tf_timestamp",new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//时间戳
+			chMap.put("service_id", "tf56pay.gateway.orderQuery");
+			chMap.put("sign_type", "MD5");
+			chMap.put("terminal", "PC");
+			chMap.put("version", "01");
+			chMap.put("businessnumber", orderId);
+			chMap.put("tf_sign", ParamUtils.map2MD5(chMap));// 签名
+			logger.info("签名="+chMap.get("tf_sign"));
+			chMap.remove("dog_sk");
+			
+			String curl = "https://openapitest.tf56.com/service/api";
+			String resp = HttpClient4Utils.sendHttpRequest(curl,chMap,"UTF-8",true);
+			
+			//响应信息处理
+			JSONObject jsonResp = JSONObject.fromObject(resp);
+			String code = jsonResp.getString("code");
+			String msg = jsonResp.getString("msg");
+			String biz_code = jsonResp.getString("biz_code");
+			String biz_msg = jsonResp.getString("biz_msg");
+			String datas = jsonResp.getString("data");
+			JSONObject jsonResps = JSONObject.fromObject(datas);
+			String status = jsonResps.getString("status");
+			String billamount = jsonResps.getString("billamount");
+			String businessnumber = jsonResps.getString("businessnumber");
+			String transactionamount = jsonResps.getString("transactionamount");
+			
+			if(!code.endsWith("GP_00")) {
+				logger.info("传化网关支付查询请求失败");
+				map.put("v_msg","请求失败,"+msg);
+				map.put("v_code","15");
+			}
+			if(!biz_code.endsWith("GPBIZ_00")) {
+				logger.info("传化网关支付业务查询错误");
+				map.put("v_msg","请求失败,"+biz_msg);
+				map.put("v_code","15");
+			}
+			logger.info("传化网关支付查询成功");
+			logger.info("交易状态=="+status);
+			logger.info("订单金额=="+billamount);
+			logger.info("支付单号=="+businessnumber);
+			logger.info("交易金额=="+transactionamount);
+			map.put("v_code", "00");
+			map.put("v_msg", "查询成功");
+			
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return map;
+	}
+	
+	/**
+	 * 商盟商务 统统付网关异步响应信息
+	 * 
+	 * @param request
+	 * @param response
+	 * @throws IOException 
+	 * @throws Exception
+	 */
+	@RequestMapping(value = "SM_notifyUrl")
+	public void SMnotifyUrl(HttpServletResponse response, HttpServletRequest request) throws IOException {
+		log.info("网关支付异步通知来了");
+		Map<String, String> result = new HashMap<String, String>();
+		Map<String, String> resps = new HashMap<String, String>();
+		//获取商盟统统付POST过来反馈信息
+	    BufferedReader reader = null;
+	    StringBuilder sb = new StringBuilder();
+	    try {
+	        reader = new BufferedReader(new InputStreamReader(request.getInputStream(), "utf-8"));
+	        String line = null;
+	        while ((line = reader.readLine()) != null) {
+	            sb.append(line);
+	        }
+	    } catch (UnsupportedEncodingException e) {
+	        e.printStackTrace();
+	    } catch (IOException e) {
+	        e.printStackTrace();
+	    } finally {
+	        try {
+	            if (null != reader) {
+	                reader.close();
+	            }
+	        } catch (IOException e) {
+	            e.printStackTrace();
+	        }
+	    }
+	    log.info("异步通知字符串="+sb.toString());
+	    try {
+		    Map<String, String> params = JSON.parseObject(sb.toString(), Map.class);	    
+		    String order_no = params.get("order_no");//商户订单号	    
+		    //String serial_no = params.get("serial_no");//商盟统统付交易号	    
+		    String status = params.get("status");//交易状态	    
+		    String resp_code = params.get("resp_code");//返回结果码 
+		    String resp_msg = params.get("resp_msg");//返回消息
+		   
+		    log.info("order_no="+order_no);
+		    //log.info("serial_no="+serial_no);
+		    log.info("status="+status);
+		    log.info("resp_code="+resp_code);
+		    		    
+		    if (order_no!=null&&order_no!=""&&status!=null&&status!=""&&resp_code!=null&&resp_code!="") {
+		    	resps.put("resp_code", "000000");
+				outString(response, JSON.toJSON(resps));
+		    	
+		        //商户的业务逻辑程序代码
+		    	OriginalOrderInfo originalInfo = null;
+				if (order_no!= null && order_no!= "") {
+					originalInfo = gateWayService.getOriginOrderInfos(order_no);
+				}
+				logger.info("网关支付异步订单数据:" + JSON.toJSON(originalInfo));
+				
+				// 订单信息
+				PmsAppTransInfo pmsAppTransInfo = pmsAppTransInfoService.searchOrderInfo(originalInfo.getOrderId());
+				if (pmsAppTransInfo != null) {
+					logger.info("回调订单信息数据：" + JSON.toJSON(pmsAppTransInfo));
+					if (!"0".equals(pmsAppTransInfo.getStatus())) {
+						logger.info("订单表信息" + pmsAppTransInfo);
+						result.put("v_oid", originalInfo.getOrderId());
+						result.put("v_txnAmt", originalInfo.getOrderAmount());
+						result.put("v_code", "00");
+						result.put("v_attach", originalInfo.getAttach());
+						result.put("v_mid", originalInfo.getPid());
+						result.put("v_time", UtilDate.getTXDateTime());
+						if(resp_code.equals("000000")) {
+							if (status.equals("1")) {
+								result.put("v_status", "0000");
+								result.put("v_msg", "支付成功");
+								
+								if ("0".equals(originalInfo.getPayType())) {
+									int i = gateWayService.UpdatePmsMerchantInfo(originalInfo,1.0);
+									if (i > 0) {
+										logger.info("*****实时入金完成");
+									} else {
+										logger.info("*****实时入金失败");
+									}
+								}
+								
+							} else if(status.equals("0")){
+								result.put("v_status", "1001");
+								result.put("v_msg", "支付失败");
+							}
+						}else {
+							logger.info("操作失败原因：" + resp_msg);
+							result.put("v_status", "1001");
+							result.put("v_msg", "支付失败");
+						}
+						ChannleMerchantConfigKey keyinfo = gateWayService.getChannelConfigKey(originalInfo.getPid());
+						// 获取商户秘钥
+						String key = keyinfo.getMerchantkey();
+						GateWayQueryResponseEntity gatewey = (GateWayQueryResponseEntity) BeanToMapUtil
+								.convertMap(GateWayQueryResponseEntity.class, result);
+						// 修改订单状态
+						gateWayService.otherInvoke(gatewey);
+
+						// 生成签名
+						String sign = SignatureUtil.getSign(beanToMap(gatewey), key, log);
+						result.put("v_sign", sign);
+
+						logger.info("异步之前的参数：" + result);
+						ConsumeResponseEntity consumeResponseEntity = (ConsumeResponseEntity) BeanToMapUtil
+								.convertMap(ConsumeResponseEntity.class, result);
+						Bean2QueryStrUtil bean2Util = new Bean2QueryStrUtil();
+						logger.info("异步给下游传的数据参数：" + bean2Util.bean2QueryStr(consumeResponseEntity));
+						String html = HttpClientUtil.post(originalInfo.getBgUrl(),
+								bean2Util.bean2QueryStr(consumeResponseEntity));
+						logger.info("下游返回状态" + html);
+						JSONObject ob = JSONObject.fromObject(html);
+						Iterator it = ob.keys();
+						Map<String, String> map = new HashMap<>();
+						while (it.hasNext()) {
+							String keys = (String) it.next();
+							if (keys.equals("success")) {
+								String value = ob.getString(keys);
+								logger.info("异步回馈的结果:" + "\t" + value);
+								map.put("success", value);
+							}
+						}
+						if (!map.get("success").equals("true")) {
+
+							logger.info("启动线程进行异步通知");
+							// 启线程进行异步通知
+							ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(),
+									bean2Util.bean2QueryStr(consumeResponseEntity)));
+						}
+
+						logger.info("向下游 发送数据成功");
+
+					} else {
+						logger.error("订单数据status=0");
+						result.put("v_code", "15");
+						result.put("v_msg", "请求失败");
+					}
+					outString(response, gson.toJson(result));
+				}
+		    } else {//验证失败
+		    	log.info("回调参数为空 ======== resp_code="+resp_code);
+		    	resps.put("resp_code", "000001");
+		    	resps.put("resp_msg", "失败");
+				outString(response, JSON.toJSON(resps));
+		    }
+		} catch (Exception e) {
+			logger.info("异步回调异常:" + e);
+			e.printStackTrace();
+		}
+	}
+	
+	
+	/**
+	 * 商盟商务 统统付网关同步响应信息
+	 * 
+	 * @param request
+	 * @param response
+	 * @throws Exception
+	 */
+	@RequestMapping(value = "SM_returnUrl")
+	public void SMreturnUrl(HttpServletResponse response, HttpServletRequest request) {
+		try {
+			logger.info("##########同步响应开始##############");
+			byte[] resByte = Base64.decodeBase64((String) request.getParameter("res"));
+			    String json = new String(resByte);
+			    Map<String, String> params1 = JSON.parseObject(json, Map.class);			    
+			    String order_no = params1.get("order_no");//商户订单号			    
+			    //String serial_no = params.get("serial_no");//商盟统统付交易号			    
+			    String status = params1.get("status");//交易状态			    
+			    String resp_code = params1.get("resp_code");//返回结果码
+			   
+			    logger.info("同步通知订单号===="+order_no);
+			    logger.info("同步通知返回结果码===="+resp_code);
+			  
+			    OriginalOrderInfo originalInfo = null;
+				if (order_no != null && order_no != "") {
+					originalInfo = this.gateWayService.getOriginOrderInfos(order_no);
+				}
+				logger.info("订单数据:" + JSON.toJSON(originalInfo));
+				Bean2QueryStrUtil queryUtil = new Bean2QueryStrUtil();
+				logger.info("下游的同步地址" + originalInfo.getPageUrl());
+				TreeMap<String, String> result = new TreeMap<String, String>();
+				String params = "";
+				if (!StringUtils.isEmpty(order_no)) {
+					ChannleMerchantConfigKey keyinfo = gateWayService.getChannelConfigKey(originalInfo.getPid());
+					// 获取商户秘钥
+					String key = keyinfo.getMerchantkey();
+					result.put("v_oid", originalInfo.getOrderId());
+					result.put("v_txnAmt", originalInfo.getOrderAmount());
+					result.put("v_code", "00");
+					result.put("v_msg", "请求成功");
+					result.put("v_time", originalInfo.getOrderTime());
+					result.put("v_mid", originalInfo.getPid());
+					ConsumeResponseEntity consume = (ConsumeResponseEntity) BeanToMapUtil
+							.convertMap(ConsumeResponseEntity.class, result);
+					String sign = SignatureUtil.getSign(beanToMap(consume), key, log);
+					result.put("v_sign", sign);
+					params = HttpURLConection.parseParams(result);
+					logger.info("给下游同步的数据:" + params);
+					request.getSession();
+					try {
+						// 给下游手动返回支付结果
+						if (originalInfo.getPageUrl().indexOf("?") == -1) {
+
+							String path = originalInfo.getPageUrl() + "?" + params;
+							logger.info("pageUrl 商户页面 重定向：" + path);
+
+							response.sendRedirect(path.replace(" ", ""));
+						} else {
+							logger.info("pageUrl 商户页面 重定向：" + originalInfo.getPageUrl());
+							String path = originalInfo.getPageUrl() + "&" + params;
+							logger.info("pageUrl 商户页面 重定向：" + path);
+							response.sendRedirect(path.replace(" ", ""));
+						}
+					} catch (Exception e) {
+						// TODO: handle exception
+						e.printStackTrace();
+					}
+
+				} else {
+			    	logger.info("同步通知订单号为空");
+			    }
+
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+	}	
 	
 }
