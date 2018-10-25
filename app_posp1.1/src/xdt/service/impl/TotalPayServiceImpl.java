@@ -345,6 +345,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						result.put("v_msg", "未找到路由，请联系业务开通！");
 						return result;
 					}
+					log.info("路由信息："+JSON.toJSONString(pmsBusinessPos));
 					//判断入金是否开启
 					if("1".equals(pmsBusinessPos.getGoldPay())) {
 						result.put("v_code", "19");
@@ -1051,12 +1052,11 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
 		DecimalFormat df1 = new DecimalFormat("######0"); //四色五入转换成整数
 		BigDecimal payAmt=new BigDecimal(payRequest.getV_amount()).setScale(2, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100));
-		BigDecimal b1 = new BigDecimal(payRequest.getV_amount());
 		// 判断交易类型
-		if (payRequest.getV_type().equals("0")) {
+		if ("0".equals(payRequest.getV_type())) {
 			JsdsRequestDto req = new JsdsRequestDto();
 			req.setMerchantCode(pmsBusinessPos.getBusinessnum());// 平台商户编号
-			req.setTerminalCode(pmsBusinessPos.getPosnum());// 平台商户终端编号
+			req.setTerminalCode(pmsBusinessPos.getDepartmentnum());// 平台商户终端编号
 			req.setTransDate(new SimpleDateFormat("yyyyMMdd").format(new Date()));// 交易日期（YYYYMMDD）
 			req.setTransTime(new SimpleDateFormat("HHmmss").format(new Date()));// 交易时间（HH24mmss）
 			req.setOrderNum(payRequest.getV_batch_no());// 合作商订单号，全局唯一
@@ -1072,14 +1072,14 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			String sign = RSAUtil.base64Encode(a);
 			log.info("加密结果:" + RSAUtil.base64Encode(a));
 			JsdsRequestDto requestDto = new JsdsRequestDto();
-			requestDto.setGroupId(pmsBusinessPos.getDepartmentnum());
-			requestDto.setService("SMZF008");
+			requestDto.setGroupId(pmsBusinessPos.getPosnum());//pmsBusinessPos.getPosnum()
+			requestDto.setService("DF001");
 			requestDto.setSignType("RSA");
 			requestDto.setSign(sign);
 			requestDto.setDatetime(new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
 			log.info("上送参数：" + JSON.toJSON(requestDto));
 			// 返回的数据
-			Map<String, String> results = this.sends(requestDto);
+			Map<String, String> results = this.sends(requestDto,pmsBusinessPos);
 			log.info("上游返回的数据:" + JSON.toJSON(results));
 			result.put("v_mid", payRequest.getV_mid());
 			result.put("v_batch_no", payRequest.getV_batch_no());
@@ -1184,10 +1184,10 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 					
 				}
 			}
-		} else if (payRequest.getV_type().equals("1")) {
+		} else if ("1".equals(payRequest.getV_type())) {
 			JsdsRequestDto req = new JsdsRequestDto();
 			req.setMerchantCode(pmsBusinessPos.getBusinessnum());// 平台商户编号
-			req.setTerminalCode(pmsBusinessPos.getPosnum());// 平台商户终端编号
+			req.setTerminalCode(pmsBusinessPos.getDepartmentnum());// 平台商户终端编号
 			req.setTransDate(new SimpleDateFormat("yyyyMMdd").format(new Date()));// 交易日期（YYYYMMDD）
 			req.setTransTime(new SimpleDateFormat("HHmmss").format(new Date()));// 交易时间（HH24mmss）
 			req.setOrderNum(payRequest.getV_batch_no());// 合作商订单号，全局唯一
@@ -1203,14 +1203,14 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			String sign = RSAUtil.base64Encode(a);
 			log.info("加密结果:" + RSAUtil.base64Encode(a));
 			JsdsRequestDto requestDto = new JsdsRequestDto();
-			requestDto.setGroupId(pmsBusinessPos.getDepartmentnum());
-			requestDto.setService("SMZF009");
+			requestDto.setGroupId(pmsBusinessPos.getPosnum());//
+			requestDto.setService("DF002");
 			requestDto.setSignType("RSA");
 			requestDto.setSign(sign);
 			requestDto.setDatetime(new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
 			log.info("上送参数：" + JSON.toJSON(requestDto));
 			// 返回的数据
-			Map<String, String> results = this.sends(requestDto);
+			Map<String, String> results = this.sends(requestDto,pmsBusinessPos);
 			log.info("上游返回的数据:" + JSON.toJSON(results));
 			result.put("v_mid", payRequest.getV_mid());
 			result.put("v_batch_no", payRequest.getV_batch_no());
@@ -1314,14 +1314,19 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	 * @param merchantinfo
 	 * @param pmsBusinessPos
 	 */
-	public Map<String, String> sends(JsdsRequestDto req) {
+	public Map<String, String> sends(JsdsRequestDto req,PmsBusinessPos pmsBusinessPos) {
 		log.info("**********************江苏电商-----生成码 开始:");
 		HashMap<String, String> param = new HashMap<String, String>();
 		HashMap<String, String> params = JsdsUtil.beanToMap(req);
 		String paramStr = HttpUtil.parseParams(params);
 		log.info("上送字符串：" + paramStr);
-		String respJson = HttpURLConection.httpURLConnectionPOST("http://180.96.28.8:8044/TransInterface/TransRequest",
-				paramStr);
+		String urls="";
+		if("928000000003607".equals(pmsBusinessPos.getBusinessnum())) {
+			urls="http://121.41.121.164:8044/TransInterface/TransRequest";
+		}else {
+			urls="http://180.96.28.8:8044/TransInterface/TransRequest";
+		}
+		String respJson = HttpURLConection.httpURLConnectionPOST(urls,paramStr);
 		log.info("上游返回字符串数据：" + respJson);
 		if (respJson != null && respJson != "") {
 			json = JSONObject.fromObject(respJson);
@@ -6315,7 +6320,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		          UpdateDaifu(payRequest.getV_batch_no(), "02");
 		          Map<String, String> map = new HashMap();
 		          map.put("machId", payRequest.getV_mid());
-		          Double amount=Double.parseDouble(payRequest.getV_sum_amount()) + Double.parseDouble(merchantinfo.getPoundage());
+		          Double amount=Double.parseDouble(payRequest.getV_sum_amount())*100 + Double.parseDouble(merchantinfo.getPoundage())*100;
 		          map.put("payMoney",amount.toString());
 		          int nus = 0;
 		          if ("0".equals(payRequest.getV_type())) {
@@ -6342,13 +6347,13 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		          }
 		        }else if(status.equals("exception")){
 			        //不确定  主动查询
-		        	ThreadPool.executor(new CHThread(this, payRequest, merchantinfo));
+		        	//ThreadPool.executor(new CHThread(this, payRequest, merchantinfo));
 		        }
 		      }else
 		      {
 		        this.log.info("传化代付无响应信息");
 		        //不确定  主动查询
-		        ThreadPool.executor(new CHThread(this, payRequest, merchantinfo));
+		        //ThreadPool.executor(new CHThread(this, payRequest, merchantinfo));
 		      }
 		    }
 		    catch (Exception e)
@@ -6444,7 +6449,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 				          UpdateDaifu(payRequest.getV_batch_no(), "02");
 				          Map<String, String> map = new HashMap();
 				          map.put("machId", payRequest.getV_mid());
-				          Double amount=Double.parseDouble(payRequest.getV_sum_amount()) + Double.parseDouble(merchantinfo.getPoundage());
+				          Double amount=Double.parseDouble(payRequest.getV_sum_amount()) *100+ Double.parseDouble(merchantinfo.getPoundage())*100;
 				          map.put("payMoney",amount.toString());
 				          int nus = 0;
 				          if ("0".equals(payRequest.getV_type())) {

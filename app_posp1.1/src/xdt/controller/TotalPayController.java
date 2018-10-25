@@ -2378,7 +2378,7 @@ public class TotalPayController extends BaseAction {
 						}
 						Map<String, String> map =new HashMap<>();
 						map.put("machId",originalInfo.getPid());
-						map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))+"");
+						map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))*100+"");
 						int nus =0;
 						if("0".equals(type)) {
 							nus =service.updataPay(map);
@@ -2533,7 +2533,7 @@ public class TotalPayController extends BaseAction {
 				}
 				Map<String, String> map =new HashMap<>();
 				map.put("machId",originalInfo.getPid());
-				map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))+"");
+				map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))*100+"");
 				int nus =0;
 				if("0".equals(type)) {
 					nus =service.updataPay(map);
@@ -2713,7 +2713,7 @@ public class TotalPayController extends BaseAction {
 					}
 					Map<String, String> map =new HashMap<>();
 					map.put("machId",originalInfo.getPid());
-					map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))+"");
+					map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))*100+"");
 					int nus =0;
 					if("0".equals(type)) {
 						nus =service.updataPay(map);

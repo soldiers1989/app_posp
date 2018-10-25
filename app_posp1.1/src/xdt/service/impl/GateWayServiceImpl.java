@@ -149,7 +149,7 @@ public class GateWayServiceImpl extends BaseServiceImpl implements IGateWayServi
 		
 		OriginalOrderInfo original = null;
 		// 查询流水信息
-		PospTransInfo transInfo = pospTransInfoDAO.searchBytransOrderId(tranId);
+		PospTransInfo transInfo = pospTransInfoDAO.searchBycjtOrderId(tranId);
 		String oderId = transInfo.getOrderId();
 		logger.info("根据上送订单号  查询商户上送原始信息");
 		original = originalDao.getOriginalOrderInfoByOrderid(oderId);
@@ -516,7 +516,7 @@ public class GateWayServiceImpl extends BaseServiceImpl implements IGateWayServi
 		// 流水表transOrderId
 		String transOrderId = result.getV_oid();
 		// 流水信息
-		PospTransInfo pospTransInfo = pospTransInfoDAO.searchBytransOrderId(transOrderId);
+		PospTransInfo pospTransInfo = pospTransInfoDAO.searchBycjtOrderId(transOrderId);
 		logger.info("流水表信息" + pospTransInfo);
 		// 订单信息
 		PmsAppTransInfo pmsAppTransInfo = pmsAppTransInfoDao.searchOrderInfo(pospTransInfo.getOrderId());
