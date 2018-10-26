@@ -36,7 +36,7 @@ public class SDThread extends Thread{
 		Map<String, String> map =new HashMap<>();
 		try {
 			Thread.sleep(2000);
-			for (int i = 0; i < 30; i++) {
+			for (int i = 0; i < 50; i++) {
 			log.info("进入循环了");
 			 map= service.sdQuick(payRequest.getV_mid(), payRequest.getV_batch_no());
 			 log.info("查询完了");
@@ -78,7 +78,7 @@ public class SDThread extends Thread{
 				 }
 				 	
 			 }
-			 Thread.sleep(60000);
+			 Thread.sleep(300000);
 			}
 		} catch (Exception e) {
 			// TODO: handle exception
