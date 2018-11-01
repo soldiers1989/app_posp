@@ -1350,7 +1350,7 @@ public class GateWayController extends BaseAction {
 						result.remove("v_code");
 						logger.info("上送的数据:" + result);
 						html = EffersonPayService.createAutoFormHtml(
-								"http://218.4.234.150:9600/sslpayment", result, "UTF-8");
+								"https://www.95epay.cn/sslpayment", result, "UTF-8");
 						outString(response, html);
 						break;
 					default:
