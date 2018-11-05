@@ -55,6 +55,11 @@ import org.apache.http.NameValuePair;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.protocol.HTTP;
 import org.apache.log4j.Logger;
+import org.apache.poi.hssf.usermodel.HSSFCell;
+import org.apache.poi.hssf.usermodel.HSSFRow;
+import org.apache.poi.hssf.usermodel.HSSFSheet;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFCell;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.jdom.Document;
 import org.jdom.Element;
@@ -547,7 +552,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						log.info("代付订单添加成功");
 						//int iii =insertProfit(payRequest.getV_batch_no(), payRequest.getV_sum_amount(), merchantinfo, "代付", payRequest.getV_type());
 						//System.out.println(iii);
-						switch (pmsBusinessPos.getChannelnum()) {//
+						switch (pmsBusinessPos.getChannelnum()) {//pmsBusinessPos.getChannelnum()
 
 						case "SXYWG":// 首信易网关
 							result = payeasyAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
@@ -654,6 +659,9 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 							break;
 						case "TTF":
 							ttfPay(payRequest, result, merchantinfo, pmsBusinessPos);
+							break;
+						case "YYTJL"://银盈通间联
+							yytjlPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						default:
 							result.put("v_code", "17");
@@ -1123,7 +1131,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 					}else if("pl_transState=2".equals(signs1[3])){
 						log.info("又失败了3");
 						result.put("v_status", "1001");
-						result.put("v_status_msg", "代付失败");
+						result.put("v_status_msg", "代付失败,"+signs1[4]);
 						UpdateDaifu(payRequest.getV_batch_no(), "01");
 						Map<String, String> map =new HashMap<>();
 						map.put("machId",payRequest.getV_mid());
@@ -1155,7 +1163,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 				} else {
 					log.info("2进来了！");
 					result.put("v_status", "1001");
-					result.put("v_status_msg", "代付失败");
+					result.put("v_status_msg", "代付失败,"+results.get("pl_message"));
 					UpdateDaifu(payRequest.getV_batch_no(), "01");
 					Map<String, String> map =new HashMap<>();
 					map.put("machId",payRequest.getV_mid());
@@ -1196,6 +1204,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			req.setBankName(payRequest.getV_bankname());// 收款人账户开户行名称
 			req.setBankLinked(payRequest.getV_pmsBankNo());// 收款人账户开户行联行号
 			req.setTransMoney(df1.format(payAmt));// 交易金额
+			req.setBankCode(payRequest.getV_bankCode().toLowerCase());
 			HashMap<String, String> params = JsdsUtil.beanToMap(req);
 			String str = HttpUtil.parseParams(params);
 			log.info("str:" + str);
@@ -1221,6 +1230,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			if (results.get("msg").equals("1")) {
 				log.info("1未知结果进来了！！！");
 				UpdateDaifu(payRequest.getV_batch_no(), "200");
+				this.updateSelect(req, result, merchantinfo);
 			} else {
 				if ("0000".equals(results.get("pl_code"))) {
 					log.info("1进来了！");
@@ -1240,10 +1250,11 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						UpdateDaifu(payRequest.getV_batch_no(), "200");
 						result.put("v_status", "200");
 						result.put("v_status_msg", "处理中");
+						this.updateSelect(req, result, merchantinfo);
 					} else if("pl_transState=2".equals(signs1[3])){
 						log.info("又失败了3");
 						result.put("v_status", "1001");
-						result.put("v_status_msg", "代付失败");
+						result.put("v_status_msg", "代付失败,"+signs1[4]);
 						UpdateDaifu(payRequest.getV_batch_no(), "02");
 						Map<String, String> map =new HashMap<>();
 						map.put("machId",payRequest.getV_mid());
@@ -1273,7 +1284,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 				} else {
 					log.info("2进来了！");
 					result.put("v_status", "1001");
-					result.put("v_status_msg", "代付失败");
+					result.put("v_status_msg", "代付失败,"+results.get("pl_message"));
 					UpdateDaifu(payRequest.getV_batch_no(), "01");
 					Map<String, String> map =new HashMap<>();
 					map.put("machId",payRequest.getV_mid());
@@ -6491,6 +6502,109 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		  }
 	
 	
-   
+	public Map<String, String> yytjlPay(DaifuRequestEntity payRequest, Map<String, String> result,PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos)throws Exception{
+		TreeMap<String, Object> paramsMap = new TreeMap<>();
+        paramsMap.put("v_version", "1.0.0.0");
+        paramsMap.put("v_mid", "10032061473");//payRequest.getV_mid()
+        paramsMap.put("v_count", payRequest.getV_count());
+        paramsMap.put("v_sum_amount", payRequest.getV_amount());
+        paramsMap.put("v_batch_no", payRequest.getV_batch_no());
+        paramsMap.put("v_cardNo", payRequest.getV_cardNo());
+        paramsMap.put("v_realName", payRequest.getV_realName());
+        paramsMap.put("v_bankname", payRequest.getV_bankname());
+        paramsMap.put("v_province", payRequest.getV_province());
+        paramsMap.put("v_city", payRequest.getV_city());
+        paramsMap.put("v_amount", payRequest.getV_amount());
+        paramsMap.put("v_identity", System.currentTimeMillis() + "");
+        paramsMap.put("v_pmsBankNo", payRequest.getV_pmsBankNo());
+        paramsMap.put("v_type", payRequest.getV_type());
+        paramsMap.put("v_time", payRequest.getV_time());
+        paramsMap.put("v_currency", payRequest.getV_currency());
+        paramsMap.put("v_accountType", payRequest.getV_accountType());
+        paramsMap.put("v_phone", payRequest.getV_phone());
+        paramsMap.put("v_cert_no", payRequest.getV_cert_no());
+        paramsMap.put("v_cardType", payRequest.getV_cardType());
+        String key = "8ff5d137fe184c4ea67e281ebb4a4290";
+        String sign = SignatureUtil.getSign(paramsMap, key, log);
+        System.out.println("签名:" + sign);
+        paramsMap.put("sign", sign);
+        String str = xdt.dto.scanCode.util.SimpleHttpUtils.httpPost("https://www.lssc888.cn/app_posp/totalPayController/merchant/virement/mer_payment.action", paramsMap);
+        System.out.println("返回数据:" + str);
+		
+		
+	
+		return result;
+	}
 
+	@Override
+	public Map<String, String> yyTPay(DaifuRequestEntity payRequest, Map<String, String> result) {
+		
+		try {
+			String path =new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath()+"//upload//"+payRequest.getV_fileName().getOriginalFilename();
+
+			HSSFWorkbook hssfWorkbook = new HSSFWorkbook(new FileInputStream(path));   
+		      
+		    // 循环工作表Sheet  
+		    for(int numSheet = 0; numSheet < hssfWorkbook.getNumberOfSheets(); numSheet++){ 
+		    	
+		      HSSFSheet hssfSheet = hssfWorkbook.getSheetAt( numSheet);  
+		      if(hssfSheet == null){  
+		        continue;  
+		      }  
+		        
+		      // 循环行Row   
+		      for(int rowNum = 1; rowNum <= hssfSheet.getLastRowNum(); rowNum++){  
+		        HSSFRow hssfRow = hssfSheet.getRow( rowNum);  
+		        if(hssfRow == null){  
+		          continue;  
+		        }  
+		          payRequest.setV_mid(getValue(hssfRow.getCell(0)));
+		          //============0--------------------------------
+		          
+		          
+		          
+		        // 循环列Cell    
+		       /* for(int cellNum = 0; cellNum <= hssfRow.getLastCellNum(); cellNum++){ 
+		          HSSFCell hssfCell = hssfRow.getCell( cellNum); 
+		          if(hssfCell == null){  
+		            continue;  
+		          }  
+		          
+		          System.out.print("    " + getValue( hssfCell));  
+		        } */ 
+		        System.out.println(); 
+		       
+		      }  
+		      
+		    }  	
+		
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		return result;
+	}
+	public String getValue(HSSFCell hssfCell){ 
+		 DecimalFormat df = new DecimalFormat("#");
+		    if(hssfCell.getCellType() == hssfCell.CELL_TYPE_BOOLEAN){  
+		      return String.valueOf( hssfCell.getBooleanCellValue());  
+		    }else if(hssfCell.getCellType() == hssfCell.CELL_TYPE_NUMERIC){  
+		      return String.valueOf(df.format(hssfCell.getNumericCellValue()));  
+		    }else{  
+		      return String.valueOf( hssfCell.getStringCellValue());  
+		    }  
+		  }  
+	 
+	public String getValue(XSSFCell xssfCell){  
+		  DecimalFormat df = new DecimalFormat("#");
+	    if(xssfCell.getCellType() == xssfCell.CELL_TYPE_BOOLEAN){  
+	      return String.valueOf( xssfCell.getBooleanCellValue());  
+	    }else if(xssfCell.getCellType() == xssfCell.CELL_TYPE_NUMERIC){  
+	    	
+	      return String.valueOf(df.format(xssfCell.getNumericCellValue()) );  
+	    }else{  
+	      return String.valueOf( xssfCell.getStringCellValue());  
+	    }  
+	  } 
 }
