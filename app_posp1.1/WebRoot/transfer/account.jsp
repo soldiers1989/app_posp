@@ -10,26 +10,26 @@
 <body>
 <center>
 版本号:<input type="text" name="v_version" class="v_version" value="1.0.0.0"><br />
-商户号:<input type="text" name="v_mid" class="v_mid" value="10032061473"><br />
+商户号:<input type="text" name="v_mid" class="v_mid" value="10011018080"><br />
 总行数:<input type="text" name="v_count" class="v_count" value="1"><br />
-总金额： <input type="text" class="v_sum_amount" name="v_sum_amount" value="0.02"/><br />
+总金额： <input type="text" class="v_sum_amount" name="v_sum_amount" value="1"/><br />
 批次号： <input type="text" class="v_batch_no" name="v_batch_no" value="<%=System.currentTimeMillis()%>"/><br />
-账号： <input type="text" class="v_cardNo" name="v_cardNo" value="6228450028016697770"/><br />
-帐户名： <input type="text" class="v_realName" name="v_realName" value="李娟"/><br />
-开户行： <input type="text" class="v_bankname" name="v_bankname" value="中国农业银行天津广厦支行"/><br />
+账号： <input type="text" class="v_cardNo" name="v_cardNo" value="6230520020020273971"/><br />
+帐户名： <input type="text" class="v_realName" name="v_realName" value="刘文静"/><br />
+开户行： <input type="text" class="v_bankname" name="v_bankname" value="中国农业银行天津凯旋门支行"/><br />
 银行代码： <input type="text" class="v_bankCode" name="v_bankCode" value="ABC"/><br />
 银行编号： <input type="text" class="v_bankNumber" name="v_bankNumber" value="103"/><br />
 省份： <input type="text" class="v_province" name="v_province" value="天津市"/><br />
 城市： <input type="text" class="v_city" name="v_city" value="天津市"/><br />
 金额： <input type="text" class="v_amount" name="v_amount" value="0.02"/><br />
 客户标示： <input type="text" class="v_identity" name="v_identity" value="<%=System.currentTimeMillis()%>"/><br />
-联行号： <input type="text" class="v_pmsBankNo" name="v_pmsBankNo" value="103110023002"/><br />
+联行号： <input type="text" class="v_pmsBankNo" name="v_pmsBankNo" value="103110025032"/><br />
 代付类型： <input type="text" class="v_type" name="v_type" value="0"/><br />
 代付时间： <input type="text" class="v_time" name="v_time" value="<%=UtilDate.getOrderNum()%>"/><br />
 代付币种： <input type="text" class="v_currency" name="v_currency" value="1"/><br />
 账号类型： <input type="text" class="v_accountType" name="v_accountType" value="1"/><br />
-手机号： <input type="text" class="v_phone" name="v_phone" value="13323358548"/><br />
-证件号： <input type="text" class="v_cert_no" name="v_cert_no" value="120105197510055420"/><br />
+手机号： <input type="text" class="v_phone" name="v_phone" value="13602199513"/><br />
+证件号： <input type="text" class="v_cert_no" name="v_cert_no" value="120104198505133824"/><br />
 1:对私2:对公： <input type="text" class="v_cardType" name="v_cardType" value="1"/><br />
 
 <input type="button" value="提交" onclick="tijiao()"><br />

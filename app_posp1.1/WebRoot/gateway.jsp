@@ -20,7 +20,7 @@
 		
 			<tr>
 				<td>商户号：</td>
-				<td><input type="text" name="v_mid" value="10032061473"></td>
+				<td><input type="text" name="v_mid" value="10011018080"></td>
 			</tr>
 			<tr>
 				<td>订单号：</td>
@@ -31,21 +31,21 @@
 				<td>交易金额:
 				</td>
 				<td><input type="text" name="v_txnAmt"
-					value="100"></td>
+					value="1"></td>
 			</tr>
 						<tr>
 				<td>异步通知url：</td>
 				<td><input type="text" name="v_notify_url"
-					value="http://60.28.24.164:8102/app_posp/test/qrcode/interface.action"></td>
+					value="http://22qp179236.iask.in:41739/app_posp/aa/SMYB.action"></td>
 			</tr>
 			<tr>
 				<td>前台通知页面地址：</td>
 				<td><input type="text" name="v_url"
-					value="http://60.28.24.164:8102/app_posp/test/qrcode/interface.action"></td>
+					value="http://22qp179236.iask.in:41739/app_posp/aa/SMYB.action"></td>
 			</tr>
 						<tr>
 				<td>错误页面：</td>
-				<td><input type="text" name="v_errorUrl" value="http://60.28.24.164:8102/app_posp/test/qrcode/interface.action"></td>
+				<td><input type="text" name="v_errorUrl" value="http://22qp179236.iask.in:41739/app_posp/aa/SMYB.action"></td>
 			</tr>
 						<tr>
 				<td>银行编码：</td>
@@ -86,7 +86,7 @@
 			</tr>
 						<tr>
 				<td>渠道类型：</td>
-				<td><select name="v_channel">
+				<td><select name="v_type">
 					<option selected="selected" value="0">D0</option>
 					<option value="1">T1</option>
 				</select></td>
@@ -97,7 +97,7 @@
 			</tr>
 		    <tr>
 				<td>支付方式：</td>
-				<td><select name="v_type">
+				<td><select name="v_channel">
 					<option selected="selected" value="1">标准</option>
 					<option value="2">直连</option>
 				</select></td>

@@ -300,6 +300,44 @@ public class TotalPayController extends BaseAction {
 						
 			        } 
 					break;
+					
+				case "YYTJL":
+					if (file!=null) {
+						if(!file.isEmpty()) {
+							try {
+				                // 文件保存路径  
+				                String filePath = request.getSession().getServletContext().getRealPath("/") + "upload/"  
+				                        + file.getOriginalFilename();  
+				                // 转存文件  
+				                file.transferTo(new File(filePath)); 
+				                if (signUtil.checkSign(map, keyinfo.getMerchantkey(), log)) {
+
+									 log.info("银盈通付对比签名成功");
+									 result.put("type", "1");
+									 result = service.yyTPay(payRequest, result);
+
+								} else {
+									log.error("签名错误!");
+									result.put("v_code", "02");
+									result.put("v_msg", "签名错误!");
+									log.info("返回的参数:" + JSON.toJSON(result));
+								}
+				               
+				            } catch (Exception e) {  
+				                e.printStackTrace();  
+				            }  
+						}else {
+							log.info("文件有问题！");
+							result.put("v_code", "02");
+							result.put("v_msg", "文件上传错误!");
+						}
+			            
+			        } else {
+			        	log.info("文件未收到！");
+			        	result.put("v_code", "02");
+						result.put("v_msg", "文件上传错误!");
+			        }
+					break;	
 				case "TL":
 					log.info("下游上送签名串{}" + payRequest.getV_sign());
 					// 查询商户密钥

@@ -158,7 +158,7 @@
 		<servlet-class>xdt.servlet.ShowPic</servlet-class>
 		<init-param>
 			<param-name>url</param-name>
-			<param-value>http://www.lssc888.com:8102/app_posp</param-value>
+			<param-value>http://22qp179236.iask.in:41739/app_posp</param-value>
 		</init-param>
 		<load-on-startup>1</load-on-startup>
 	</servlet>
