@@ -1,5 +1,7 @@
 package xdt.service.impl;
 
+import static com.jiupai.paysdk.entity.enums.Service.SINGLETRANSFER;
+
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.DataOutputStream;
@@ -51,9 +53,16 @@ import javax.ws.rs.core.MultivaluedMap;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.http.HttpEntity;
 import org.apache.http.NameValuePair;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.protocol.HTTP;
+import org.apache.http.util.EntityUtils;
 import org.apache.log4j.Logger;
 import org.codehaus.jackson.map.ObjectMapper;
 import org.jdom.Document;
@@ -73,6 +82,9 @@ import com.innovatepay.merchsdk.request.ChinaInPayOnePayRequest;
 import com.innovatepay.merchsdk.request.ChinaInPayRequest;
 import com.innovatepay.merchsdk.request.ChinaInPaySameNamePayRequest;
 import com.innovatepay.merchsdk.util.Base64Util;
+import com.jiupai.paysdk.entity.requestDTO.SingleTransferDTO;
+import com.jiupai.paysdk.service.impl.BaseJiupayServiceImpl;
+import com.jiupai.paysdk.service.interfaces.BaseJiupayService;
 import com.kspay.MD5Util;
 import com.kspay.cert.CertVerify;
 import com.kspay.cert.LoadKeyFromPKCS12;
@@ -102,6 +114,7 @@ import xdt.dao.IPmsDaifuMerchantInfoDao;
 import xdt.dao.IPmsMerchantInfoDao;
 import xdt.dao.IPospTransInfoDAO;
 import xdt.dao.OriginalOrderInfoDao;
+import xdt.dto.BaseUtil;
 import xdt.dto.cj.BaseConstant;
 import xdt.dto.cj.ChanPayUtil;
 import xdt.dto.cx.CXThread;
@@ -163,8 +176,11 @@ import xdt.dto.transfer_accounts.util.DsfData;
 import xdt.dto.transfer_accounts.util.DsfService;
 import xdt.dto.transfer_accounts.util.JHJThread;
 import xdt.dto.transfer_accounts.util.SDThread;
+import xdt.dto.transfer_accounts.util.SQThread;
 import xdt.dto.transfer_accounts.util.TTFThread;
 import xdt.dto.transfer_accounts.util.YPLThread;
+import xdt.dto.transfer_accounts.util.kltUtil;
+import xdt.dto.transfer_accounts.util.sqUtil;
 import xdt.dto.yb.YBUtil;
 import xdt.dto.yb.YeepayService;
 import xdt.dto.yf.BatchDisburseApplyReq;
@@ -222,6 +238,7 @@ import xdt.util.XmlToMap;
 import xdt.util.utils.MD5Utils;
 import xdt.util.utils.RSAUtils;
 import xdt.util.utils.RequestUtils;
+import static com.jiupai.paysdk.entity.enums.Service.*;
 
 /**
  * @author 作者 E-mail:
@@ -231,7 +248,8 @@ import xdt.util.utils.RequestUtils;
 public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPayService {
 
 	Logger log = Logger.getLogger(this.getClass());
-
+	private static BaseJiupayService baseJiupayService = new BaseJiupayServiceImpl();
+	
 	@Resource
 	private IMerchantMineDao merchantMineDao;
 
@@ -591,9 +609,9 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						case "WZF003":// 沃支付
 							//result = wzfAccounts(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
-						case "JP":// 九派
+						/*case "JP":// 九派
 							jpPay(payRequest, result, merchantinfo, pmsBusinessPos);
-							break;
+							break;*/
 						case "YBLS":// 易宝
 							ybPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
@@ -646,14 +664,23 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						case "TL":
 							tlPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
-						case "SD":
+						case "SD"://杉德
 							SDPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
-						case "CH":
+						case "CH"://传化
 							chPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
-						case "TTF":
+						case "TTF"://统统付
 							ttfPay(payRequest, result, merchantinfo, pmsBusinessPos);
+							break;
+						case "SQ"://双乾
+							sqPay(payRequest, result, merchantinfo, pmsBusinessPos);
+							break;
+						/*case "JP":// 九派
+							jpPay(payRequest, result, merchantinfo, pmsBusinessPos);
+							break;*/
+						case "KLT":// 开联通
+							kltPay(payRequest, result, merchantinfo, pmsBusinessPos);
 							break;
 						default:
 							result.put("v_code", "17");
@@ -1065,6 +1092,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			req.setBankName(payRequest.getV_bankname());// 收款人账户开户行名称
 			req.setBankLinked(payRequest.getV_pmsBankNo());// 收款人账户开户行联行号
 			req.setTransMoney(df1.format(payAmt));// 交易金额
+			req.setBankCode(payRequest.getV_bankCode().toLowerCase());
 			HashMap<String, String> params = JsdsUtil.beanToMap(req);
 			String str = HttpUtil.parseParams(params);
 			log.info("str:" + str);
@@ -1120,6 +1148,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						result.put("v_status", "200");
 						result.put("v_status_msg", "处理中");
 						UpdateDaifu(payRequest.getV_batch_no(), "200");
+						this.updateSelect(req, result, merchantinfo);
 					}else if("pl_transState=2".equals(signs1[3])){
 						log.info("又失败了3");
 						result.put("v_status", "1001");
@@ -1196,6 +1225,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			req.setBankName(payRequest.getV_bankname());// 收款人账户开户行名称
 			req.setBankLinked(payRequest.getV_pmsBankNo());// 收款人账户开户行联行号
 			req.setTransMoney(df1.format(payAmt));// 交易金额
+			req.setBankCode(payRequest.getV_bankCode().toLowerCase());
 			HashMap<String, String> params = JsdsUtil.beanToMap(req);
 			String str = HttpUtil.parseParams(params);
 			log.info("str:" + str);
@@ -1221,6 +1251,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			if (results.get("msg").equals("1")) {
 				log.info("1未知结果进来了！！！");
 				UpdateDaifu(payRequest.getV_batch_no(), "200");
+				this.updateSelect(req, result, merchantinfo);
 			} else {
 				if ("0000".equals(results.get("pl_code"))) {
 					log.info("1进来了！");
@@ -1240,6 +1271,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 						UpdateDaifu(payRequest.getV_batch_no(), "200");
 						result.put("v_status", "200");
 						result.put("v_status_msg", "处理中");
+						this.updateSelect(req, result, merchantinfo);
 					} else if("pl_transState=2".equals(signs1[3])){
 						log.info("又失败了3");
 						result.put("v_status", "1001");
@@ -2840,7 +2872,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		return result;
 	}
 
-	/**
+/*	*//**
 	 * 九派代付
 	 * 
 	 * @param payRequest
@@ -2848,7 +2880,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 	 * @param merchantinfo
 	 * @param pmsBusinessPos
 	 * @throws Exception
-	 */
+	 *//*
 	public Map<String, String> jpPay(DaifuRequestEntity payRequest, Map<String, String> result,
 			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
 		PayBankInfo bank = new PayBankInfo();
@@ -3016,7 +3048,7 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 			}
 		}
 		return result;
-	}
+	}*/
 
 	/**
 	 * 易宝代付
@@ -6489,8 +6521,413 @@ public class TotalPayServiceImpl extends BaseServiceImpl implements ITotalPaySer
 		    }
 		    return result;
 		  }
+
+	@Override
+	public Map<String, String> sqPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
+		// TODO Auto-generated method stub
+		log.info("#############双乾代付处理 开始#############");
+		String merno=pmsBusinessPos.getBusinessnum();//商户号
+		String time=new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());//发起时间
+		String totalAmount=payRequest.getV_sum_amount();//总金额,以元为单位,精确到分
+		String num="1";//笔数
+		String batchNo=payRequest.getV_batch_no();//批次号
+		//开户名|开户行代码|卡号|卡类别1:个人（借记卡）2:企业3:信用卡|金额|订单号|地级市代码默认填（000）|备注(非必填)	
+		String content=""+payRequest.getV_realName()+"|"+payRequest.getV_bankNumber()+"|"+payRequest.getV_cardNo()+"|1|"+payRequest.getV_amount()+"|"+batchNo+"|000|";
+		
+		Map<String, Object> maps = new LinkedHashMap<String, Object>();
+		maps.put("merno", merno);
+		maps.put("time", time);
+		maps.put("totalAmount", totalAmount);
+		maps.put("num", num);
+		maps.put("batchNo", batchNo);			
+		maps.put("content", content);
+		String signature="";
+		//证书生成签名		
+        String pfxPath = new File(this.getClass().getResource("/").getPath()).getParentFile()
+				.getParentFile().getCanonicalPath() + "/ky/"+merno+".pfx";// 商户私钥 
+        log.info("商户私钥路径="+pfxPath);
+		/*String certPath = new File(this.getClass().getResource("/").getPath()).getParentFile()
+				.getParentFile().getCanonicalPath() + "/ky/"+merno+".cer";// 双乾测试环境公钥	*/		
+        String passWord = pmsBusinessPos.getKek();// 商户私钥证书密码
+        try {
+        	String beforeSignedData = joinMapValue(maps, '&');
+        	signature = sqUtil.signMessageByP1(beforeSignedData, pfxPath, passWord);
+		} catch (Exception e2) {
+			e2.printStackTrace();
+		}       
+		
+//      生产
+		String curl = "https://df.95epay.cn/merchant/numberPaid.action";
+        // 创建默认的httpClient实例
+        CloseableHttpClient httpclient = HttpClients.createDefault();
+        // 创建httpPost
+        HttpPost httppost = new HttpPost(curl);
+        
+        // 创建参数队列
+        List<NameValuePair> formparams = new ArrayList<NameValuePair>();
+        formparams.add(new BasicNameValuePair("merno", merno));
+        formparams.add(new BasicNameValuePair("time", time));
+        formparams.add(new BasicNameValuePair("totalAmount", totalAmount));
+        formparams.add(new BasicNameValuePair("num", num));
+        formparams.add(new BasicNameValuePair("batchNo", batchNo));
+        formparams.add(new BasicNameValuePair("content", content));
+        formparams.add(new BasicNameValuePair("signature", signature));
+        log.info("请求参数="+formparams.toString());
+		
+		UrlEncodedFormEntity uefEntity;		
+		try {
+			uefEntity = new UrlEncodedFormEntity(formparams, "UTF-8");  
+            httppost.setEntity(uefEntity);  
+            log.info("请求地址=" + httppost.getURI());  
+            CloseableHttpResponse resp = httpclient.execute(httppost);
+            HttpEntity entity = resp.getEntity();
+            String entitys = EntityUtils.toString(entity, "UTF-8");
+        	log.info("双乾代付请求响应信息: " + entitys);
+        	JSONObject json = JSONObject.fromObject(entitys);
+            String results = json.getString("status");//success表示提交成功,false表示提交失败
+    		String remark = json.getString("remark");//提交结果  
+    		result.put("v_mid", payRequest.getV_mid());
+	        result.put("v_batch_no", payRequest.getV_batch_no());
+	        result.put("v_sum_amount", payRequest.getV_sum_amount());
+	        result.put("v_amount", payRequest.getV_amount());
+	        result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+	        result.put("v_time", UtilDate.getDateFormatter());
+	        result.put("v_type", payRequest.getV_type());
+    		result.put("v_code", "00");
+    		result.put("v_msg", "请求成功");
+         	               
+    		if(results.equals("false")) {//请求失败
+    			log.info("双乾代付请求失败!"+remark);
+    			result.put("v_code", "15");
+    			result.put("v_msg", "请求失败");        			
+    			UpdateDaifu(payRequest.getV_batch_no(), "02");
+		          Map<String, String> map = new HashMap();
+		          map.put("machId", payRequest.getV_mid());
+		          Double amount=Double.parseDouble(payRequest.getV_sum_amount()) *100+ Double.parseDouble(merchantinfo.getPoundage())*100;
+		          map.put("payMoney",amount.toString());
+		          int nus = 0;
+		          if ("0".equals(payRequest.getV_type())) {
+		            nus = updataPay(map);
+		          } else if ("1".equals(payRequest.getV_type())) {
+		            nus = updataPayT1(map);
+		          }
+		          if (nus == 1)
+		          {
+		            this.log.info("双乾代付补款成功");
+		            DaifuRequestEntity entity1 = new DaifuRequestEntity();
+		            entity1.setV_mid(payRequest.getV_mid());
+		            entity1.setV_batch_no(payRequest.getV_batch_no() + "/A");
+		            entity1.setV_amount(payRequest.getV_sum_amount());
+		            entity1.setV_sum_amount(payRequest.getV_sum_amount());
+		            entity1.setV_identity(payRequest.getV_identity());
+		            entity1.setV_cardNo(payRequest.getV_cardNo());
+		            entity1.setV_city(payRequest.getV_city());
+		            entity1.setV_province(payRequest.getV_province());
+		            entity1.setV_type(payRequest.getV_type());
+		            entity1.setV_pmsBankNo(payRequest.getV_pmsBankNo());
+		            int ii = add(entity1, merchantinfo, result, "00");
+		            this.log.info("双乾补款订单添加条数：" + ii);
+		          }
+    			
+    		}else {//请求成功
+    			log.info("主动查询代付结果");
+    			ThreadPool.executor(new SQThread(this, payRequest, merchantinfo));
+    		}
+           
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return result;
+	}
+
+	/**
+	 * 签名前的字符串
+	 * @param map
+	 * @param connector
+	 * @return
+	 */
+	public static String joinMapValue(Map<String, Object> map, char connector)	{
+		StringBuffer b = new StringBuffer();
+		for (Map.Entry<String, Object> entry : map.entrySet()){
+			b.append(entry.getKey());
+			b.append('=');
+			if (entry.getValue() != null){
+				b.append(entry.getValue());
+			}
+			b.append(connector);
+		}
+		return b.toString().substring(0, b.length()-1);
+	}
+	
+	@Override
+	public Map<String, String> sqQuick(String merId, String batchNo) throws Exception {
+		// TODO Auto-generated method stub
+		log.info("#############双乾代付主动查询处理 开始#############");
+		Map<String, String> remap = new LinkedHashMap<String, String>();
+		Map<String, Object> map = new LinkedHashMap<String, Object>();
+		PmsBusinessPos pmsBusinessPos = selectKey(merId);
+		
+		map.put("merno", pmsBusinessPos.getBusinessnum());//商户号
+		map.put("batchNo", batchNo);//批量代付批次号
+		map.put("orderNo", batchNo);//单笔代付订单号
+		
+		//证书生成签名
+		String signature="";
+		String pfxPath = new File(this.getClass().getResource("/").getPath()).getParentFile()
+				.getParentFile().getCanonicalPath() + "/ky/"+pmsBusinessPos.getBusinessnum()+".pfx";// 商户私钥 
+		/*String certPath = new File(this.getClass().getResource("/").getPath()).getParentFile()
+				.getParentFile().getCanonicalPath() + "/ky/"+pmsBusinessPos.getBusinessnum()+".cer";// 双乾测试环境公钥		*/		
+		String passWord = pmsBusinessPos.getKek();// 商户私钥证书密码
+        try {
+        	String beforeSignedData = joinMapValue(map, '&');
+        	signature = sqUtil.signMessageByP1(beforeSignedData, pfxPath, passWord);
+		} catch (Exception e2) {
+			e2.printStackTrace();
+		}       
+		
+//      生产
+		String curl = "https://df.95epay.cn/merchant/numberPaidQuery.action";
+        // 创建默认的httpClient实例
+        CloseableHttpClient httpclient = HttpClients.createDefault();
+        // 创建httpPost
+        HttpPost httppost = new HttpPost(curl);
+        
+        // 创建参数队列
+        List<NameValuePair> formparams = new ArrayList<NameValuePair>();
+        formparams.add(new BasicNameValuePair("merno", pmsBusinessPos.getBusinessnum()));
+        formparams.add(new BasicNameValuePair("batchNo", batchNo));
+        formparams.add(new BasicNameValuePair("orderNo", batchNo));
+        formparams.add(new BasicNameValuePair("signature", signature));
+        log.info("双乾代付查询请求参数="+formparams.toString());
+		
+		UrlEncodedFormEntity uefEntity;	
+        try {
+        	uefEntity = new UrlEncodedFormEntity(formparams, "UTF-8");  
+            httppost.setEntity(uefEntity);  
+            log.info("双乾代付查询请求地址=" + httppost.getURI());  
+            CloseableHttpResponse response = httpclient.execute(httppost);  
+            HttpEntity entity = response.getEntity();
+            if (entity != null) {
+            	String entitys = EntityUtils.toString(entity, "UTF-8");
+            	log.info("双乾代付查询响应信息: " + entitys);
+                JSONObject json = JSONObject.fromObject(entitys);
+            	String result = json.getString("searchResult");//请求结果标志 success表示成功,false表示错误,failure表示失败(不用验签)
+    			String remark = json.getString("remark");
+    			if(result.equals("success")) {
+    				remap.put("v_code", "00");
+    				remap.put("v_msg", "请求成功");
+    	    		
+    				log.info("代付查询请求成功");
+    				String contents = json.getString("contents");
+    				log.info("contents===="+contents);
+    				JSONArray jsonarray=JSONArray.fromObject(contents);
+    				String aa=jsonarray.getString(0);
+    				JSONObject jsonResps = JSONObject.fromObject(aa);   		
+    				String state = jsonResps.getString("state");//单笔状态（1:已提交,2:已处理,3:已退回,4.已出账）
+    				log.info("单笔代付状态state===="+state);
+    				if(state.equals("4")) {
+    					remap.put("v_status", "1003");
+    					remap.put("v_status_msg", "已出账");
+    				}else if(state.equals("3")){
+    					remap.put("v_status", "1001");
+    					remap.put("v_status_msg", "代付失败，已退回");
+    				}
+    			}else if(result.equals("failure")){
+    				log.info("代付查询请求失败，"+remark);
+    				remap.put("v_code", "01");
+    				remap.put("v_msg", "请求失败");
+    			}
+            }else {
+            	log.info("代付查询无响应信息");
+    			remap.put("v_code", "01");
+    			remap.put("v_msg", "请求失败");
+            }
+               
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return remap;
+	}
 	
 	
-   
+	/**
+	 * 九派代付
+	 * 
+	 * @param payRequest
+	 * @param result
+	 * @param merchantinfo
+	 * @param pmsBusinessPos
+	 * @throws Exception
+	 */
+	/*public Map<String, String> jpPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
+		Map<String, String> map = new HashMap<>();	
+		try {
+			SingleTransferDTO dataMap = new SingleTransferDTO();
+			//公共请求参数
+			dataMap.setCharset("02");// 字符集02：utf-8
+			dataMap.setVersion("1.0");// 版本号
+			dataMap.setMerchantId(pmsBusinessPos.getBusinessnum());// 商户号
+			dataMap.setRequestTime(new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//请求时间
+			dataMap.setRequestId(java.lang.String.valueOf(System.currentTimeMillis()));//请求编号，当日唯一
+			dataMap.setService("singleTransfer");//请求类型
+			dataMap.setSignType("RSA256");//签名类型
+
+			//代付请求参数
+			dataMap.setMcSequenceNo(payRequest.getV_batch_no());//商户交易流水
+			dataMap.setMcTransDateTime(payRequest.getV_time());//商户交易时间
+			dataMap.setOrderNo(payRequest.getV_batch_no());//订单号
+			Integer amount1 = (int) (Double.parseDouble(payRequest.getV_sum_amount()) * 100);
+			dataMap.setAmount(amount1.toString());//交易金额,单位分
+			dataMap.setCardNo(payRequest.getV_cardNo());//交易账号
+			dataMap.setAccName(payRequest.getV_realName());//账户户名
+			dataMap.setCrdType("00");//银行卡类型
+			dataMap.setCallBackUrl(xdt.dto.transfer_accounts.util.PayUtil.jpNotifyUrl);//回调地址
+			dataMap.setRemark1("{\"mercUsage\":\"货款结算\"}");//交易备注,json字符串,用途选项有:货款结算、服务费结算、劳务报酬结算
+			
+		    String merchantCert=new File(this.getClass().getResource("/").getPath()).getParentFile()
+					.getParentFile().getCanonicalPath() + "/ky/xxxxxxxxxx.p12";//商户证书路径 .p12文件
+		    String merchantPass="xxxxxxxxxxxxx";//商户证书密码
+		    String rootcerPath=new File(this.getClass().getResource("/").getPath()).getParentFile()
+					.getParentFile().getCanonicalPath() + "/ky/xxxxxxxx.cer";//根证书路径  .cer文件
+		    String url="https://jd.jiupaipay.com/paygateway/mpsGate/mpsTransaction";//请求地址
+		    
+			String resp= baseJiupayService.doSend(SINGLETRANSFER,dataMap,merchantCert,merchantPass,rootcerPath,url);
+			log.info("代付返回参数：" + resp);
+			
+			result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount", payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+			
+//			if() {
+//				
+//			}else {
+//				
+//			}
+			
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		
+		return result;
+	}*/
+
+	/**
+	 * 开联通代付
+	 * 
+	 * @param payRequest
+	 * @param result
+	 * @param merchantinfo
+	 * @param pmsBusinessPos
+	 * @throws Exception
+	 */
+	public Map<String, String> kltPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos) throws Exception {
+		// TODO Auto-generated method stub
+		log.info("#############开联通代付处理 开始#############");
+		Map<String, Object> map = new LinkedHashMap<String, Object>();
+		try {
+			net.sf.json.JSONObject json1 = new net.sf.json.JSONObject();
+		    json1.put("merchantId", pmsBusinessPos.getBusinessnum());//商户号
+		    json1.put("signType", "1");//签名类型，0：数字证书 1：md5
+
+		    net.sf.json.JSONObject json2 = new net.sf.json.JSONObject();
+			json2.put("mchtOrderNo", payRequest.getV_batch_no());//订单号
+		    json2.put("orderDateTime",payRequest.getV_time());//订单时间，yyyyMMddHHmmss
+		    json2.put("accountNo", payRequest.getV_cardNo());//收款方账号
+		    json2.put("accountName", payRequest.getV_realName());//收款方姓名
+		    json2.put("accountType", "1");//收款方账户类型1代表个人账户  2代表企业账户
+		    json2.put("bankNo", "000000000000");//款方开户行行号（电子联行号）对公需要校验，对私填写000000000000（12个0）
+		    json2.put("bankName", payRequest.getV_bankname());//收款方开户行名称,个人账户只写银行名
+		    Integer amount1 = (int) (Double.parseDouble(payRequest.getV_sum_amount()) * 100);
+		    json2.put("amt", amount1.toString());//金额，正整数，单位为分
+		    json2.put("purpose", "货款结算");//用途
+		    json2.put("notifyUrl", xdt.dto.transfer_accounts.util.PayUtil.kltNotifyUrl);//交易结果通知地址
+		    
+		    map.put("head", json1);
+		    map.put("content", json2);
+		    
+		    JSONObject sendObject = JSONObject.fromObject(map);	
+	        String originSign = sendObject.toString();
+	        log.info("参与签名的数据="+originSign);
+	        String key=pmsBusinessPos.getKek();
+	        String signStr = kltUtil.addSign(originSign,key);
+	        log.info("请求的参数="+signStr);
+	        //测试
+	        //String url = "https://ipay.chinasmartpay.cn/openapi/singlePayment/payment";
+	        //正式
+	         String url = "https://openapi.openepay.com/openapi/singlePayment/payment";
+	        //忽略SSL认证
+	        String resp = kltUtil.sendHttpPostRequest(url, signStr, false);
+	        log.info("开联通代付响应信息="+resp);
+	        
+	        result.put("v_mid", payRequest.getV_mid());
+			result.put("v_batch_no", payRequest.getV_batch_no());
+			result.put("v_code", "00");
+			result.put("v_msg", "请求成功");
+			result.put("v_sum_amount", payRequest.getV_sum_amount());
+			result.put("v_amount", payRequest.getV_amount());
+			result.put("v_identity", payRequest.getV_identity() == null ? "" : payRequest.getV_identity());
+			result.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+			result.put("v_type", payRequest.getV_type());
+			
+			if(resp!=null&&resp!="") {
+				JSONObject reObject = JSONObject.fromObject(resp);
+		        String responseCode=reObject.getString("responseCode");//响应码，000000表示接口响应正常，其它表示失败
+		        String responseMsg=reObject.getString("responseMsg");//响应信息
+		        if(!responseCode.equals("000000")) {
+		        	log.info(responseMsg);
+		        	result.put("v_code", "15");
+		        	result.put("v_msg", "请求失败，"+responseMsg);
+					
+					//补款     			
+	    			UpdateDaifu(payRequest.getV_batch_no(), "02");
+		            Map<String, String> map1 = new HashMap();
+		            map1.put("machId", payRequest.getV_mid());
+		            Double amount=Double.parseDouble(payRequest.getV_sum_amount()) *100+ Double.parseDouble(merchantinfo.getPoundage())*100;
+		            map1.put("payMoney",amount.toString());
+		            int nus = 0;
+		            if ("0".equals(payRequest.getV_type())) {
+		                nus = updataPay(map1);
+		            } else if ("1".equals(payRequest.getV_type())) {
+		                nus = updataPayT1(map1);
+		            }
+		            if (nus == 1)
+		            {
+			            this.log.info("开联通代付补款成功");
+			            DaifuRequestEntity entity1 = new DaifuRequestEntity();
+			            entity1.setV_mid(payRequest.getV_mid());
+			            entity1.setV_batch_no(payRequest.getV_batch_no() + "/A");
+			            entity1.setV_amount(payRequest.getV_sum_amount());
+			            entity1.setV_sum_amount(payRequest.getV_sum_amount());
+			            entity1.setV_identity(payRequest.getV_identity());
+			            entity1.setV_cardNo(payRequest.getV_cardNo());
+			            entity1.setV_city(payRequest.getV_city());
+			            entity1.setV_province(payRequest.getV_province());
+			            entity1.setV_type(payRequest.getV_type());
+			            entity1.setV_pmsBankNo(payRequest.getV_pmsBankNo());
+			            int ii = add(entity1, merchantinfo, result, "00");
+			            this.log.info("开联通补款订单添加条数：" + ii);
+		           }
+		        }
+			}else {
+				log.info("开联通代付无响应信息");
+			}
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return result;
+	}   
 
 }

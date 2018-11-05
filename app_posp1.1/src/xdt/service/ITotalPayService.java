@@ -120,4 +120,12 @@ public interface ITotalPayService {
 	public Map<String, String> yttQuick(String merId, String batchNo)throws Exception;
 	public Map<String, String> sdQuick(String merId, String batchNo) throws IOException;
 	public Map<String, String> chQuick(String merId, String batchNo) throws IOException;
+	
+	public Map<String, String> sqPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos)throws Exception;
+	public Map<String, String> sqQuick(String merId, String batchNo)throws Exception;
+	
+	public Map<String, String> kltPay(DaifuRequestEntity payRequest, Map<String, String> result,
+			PmsMerchantInfo merchantinfo, PmsBusinessPos pmsBusinessPos)throws Exception;
+	
 }

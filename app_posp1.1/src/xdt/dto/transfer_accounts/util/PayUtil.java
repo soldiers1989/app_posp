@@ -16,4 +16,6 @@ public class PayUtil {
 	public static final String sdNotifyUrl=BaseUtil.url+"/totalPayController/SDNotifyUrl.action";//杉德代付异步
 	public static final String chNotifyUrl=BaseUtil.url+"/totalPayController/CHNotifyUrl.action";//传化代付异步
 	public static final String ttfNotifyUrl=BaseUtil.url+"/totalPayController/TTFNotifyUrl.action";//统统付代付异步
+	public static final String jpNotifyUrl=BaseUtil.url+"/totalPayController/JPNotifyUrl.action";//九派代付异步
+	public static final String kltNotifyUrl=BaseUtil.url+"/totalPayController/KLTNotifyUrl.action";//开联通代付异步
 }

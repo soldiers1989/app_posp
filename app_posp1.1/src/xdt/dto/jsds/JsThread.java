@@ -89,8 +89,8 @@ public class JsThread extends Thread {
 							apply.getBytes());
 					logger.info("上送的签名:" + sign);
 					Map<String, String> map = new HashMap<String, String>();
-					map.put("groupId", busInfo.getDepartmentnum());
-					map.put("service", "SMZF010");
+					map.put("groupId", busInfo.getPosnum());
+					map.put("service", "DF003");
 					map.put("signType", "RSA");
 					map.put("sign", RSAUtil.base64Encode(sign));
 					map.put("datetime", UtilDate.getOrderNum());
