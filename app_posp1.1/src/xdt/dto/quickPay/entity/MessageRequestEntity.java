@@ -63,10 +63,20 @@ public class MessageRequestEntity {
 	
 	private String v_payChannelCode;//支付通道银行编码例子：ABC
 	
+	private String v_clientIP;//客户端ip
+	
 	private String v_sign; //签名
 
 	
 	
+	public String getV_clientIP() {
+		return v_clientIP;
+	}
+
+	public void setV_clientIP(String v_clientIP) {
+		this.v_clientIP = v_clientIP;
+	}
+
 	public String getV_verifyId() {
 		return v_verifyId;
 	}

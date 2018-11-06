@@ -226,6 +226,7 @@ public class TotalPayController extends BaseAction {
 		response.setHeader("Access-Control-Allow-Origin", "*");
 		response.setContentType("text/html;charset=utf-8");
 		
+		
 		Map<String, String> result = new HashMap<>();
 		if (!StringUtils.isEmpty(payRequest.getV_mid())) {
 			ChannleMerchantConfigKey keyinfo = clientCollectionPayService
@@ -359,33 +360,72 @@ public class TotalPayController extends BaseAction {
 					}
 					break;
 				default:
-					//检验数据是否合法
-					if (service.validationStr(payRequest)) {
-						log.info("下游上送签名串{}" + payRequest.getV_sign());
-						// 查询商户密钥
-						
-						// ------------------------需要改签名
-						 merchantKey = keyinfo.getMerchantkey();
-						
-						if (signUtil.checkSign(map, merchantKey, log)) {
-
-							log.info("对比签名成功");
-							
-							result = service.pay(payRequest, result);
-
-						} else {
-							log.error("签名错误!");
+					
+					String ip =getIpAddr(request);
+					log.info("客户端请求ip:"+ip);
+					if("10035071679".equals(payRequest.getV_mid())) {
+						if(!"119.23.72.112".equals(ip)&&!"120.78.197.74".equals(ip)&&!"120.78.51.183".equals(ip)&&!"113.61.49.89".equals(ip)) {
 							result.put("v_code", "02");
-							result.put("v_msg", "签名错误!");
-							log.info("返回的参数:" + JSON.toJSON(result));
+							result.put("v_msg", "不在白名单范围内!");
+						}else {
+							//检验数据是否合法
+							if (service.validationStr(payRequest)) {
+								log.info("下游上送签名串{}" + payRequest.getV_sign());
+								// 查询商户密钥
+								
+								// ------------------------需要改签名
+								 merchantKey = keyinfo.getMerchantkey();
+								
+								if (signUtil.checkSign(map, merchantKey, log)) {
+
+									log.info("对比签名成功");
+									
+									result = service.pay(payRequest, result);
+
+								} else {
+									log.error("签名错误!");
+									result.put("v_code", "02");
+									result.put("v_msg", "签名错误!");
+									log.info("返回的参数:" + JSON.toJSON(result));
+								}
+							}else {
+								
+								log.error("数据不合法!");
+								result.put("v_code", "12");
+								result.put("v_msg", "数据不合法");
+								
+							}
 						}
 					}else {
-						
-						log.error("数据不合法!");
-						result.put("v_code", "12");
-						result.put("v_msg", "数据不合法");
-						
+						//检验数据是否合法
+						if (service.validationStr(payRequest)) {
+							log.info("下游上送签名串{}" + payRequest.getV_sign());
+							// 查询商户密钥
+							
+							// ------------------------需要改签名
+							 merchantKey = keyinfo.getMerchantkey();
+							
+							if (signUtil.checkSign(map, merchantKey, log)) {
+
+								log.info("对比签名成功");
+								
+								result = service.pay(payRequest, result);
+
+							} else {
+								log.error("签名错误!");
+								result.put("v_code", "02");
+								result.put("v_msg", "签名错误!");
+								log.info("返回的参数:" + JSON.toJSON(result));
+							}
+						}else {
+							
+							log.error("数据不合法!");
+							result.put("v_code", "12");
+							result.put("v_msg", "数据不合法");
+							
+						}
 					}
+					
 					
 					break;
 				}

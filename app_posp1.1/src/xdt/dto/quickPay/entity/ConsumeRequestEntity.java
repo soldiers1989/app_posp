@@ -15,6 +15,10 @@ public class ConsumeRequestEntity {
 	
 	private String v_oid; //原订单号
 	
+	private String v_verifyId;//获取短信返回参数
+	
+	private String v_clientIP;//用户终端ip
+	
 	private String v_smsCode; //交易验证码
 	
 	private String v_time; //交易时间
@@ -22,6 +26,25 @@ public class ConsumeRequestEntity {
 	private String v_type; //交易类型
 	
 	private String v_sign; //签名
+
+	
+
+
+	public String getV_clientIP() {
+		return v_clientIP;
+	}
+
+	public void setV_clientIP(String v_clientIP) {
+		this.v_clientIP = v_clientIP;
+	}
+
+	public String getV_verifyId() {
+		return v_verifyId;
+	}
+
+	public void setV_verifyId(String v_verifyId) {
+		this.v_verifyId = v_verifyId;
+	}
 
 	public String getV_version() {
 		return v_version;

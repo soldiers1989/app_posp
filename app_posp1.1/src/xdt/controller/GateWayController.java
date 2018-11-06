@@ -1189,6 +1189,9 @@ public class GateWayController extends BaseAction {
 					case "SQ":
 						sqPay(param, result,busInfo);
 						break;
+					case "KLT":
+						kltPay(param, result,busInfo);
+						break;
 					default:
 						break;
 					}
@@ -2452,6 +2455,12 @@ public class GateWayController extends BaseAction {
 						if ("4".equals(pl_payState)) {
 							result.put("v_status", "0000");
 							result.put("v_msg", "支付成功");
+							/*int i =gateWayService.UpdatePmsMerchantInfo(originalInfo, 0.8);
+							if(i==1) {
+								log.info("江苏电商80%入金成功");
+							}else {
+								log.info("江苏电商80%入金失败");
+							}*/
 						} else if("5".equals(pl_payState)||"1".equals(pl_payState)||"3".equals(pl_payState)) {
 							result.put("v_status", "1001");
 							result.put("v_msg", "支付失败");
@@ -4115,6 +4124,48 @@ public class GateWayController extends BaseAction {
 		log.info("上传之前参数："+JSON.toJSONString(result));
 		return result;
 	}
+	
+		//开联通网关支付
+		public Map<String, String> kltPay(GateWayRequestEntity entity, Map<String, String> result, PmsBusinessPos pmsBusinessPos) throws Exception{
+			log.info("开联通网关来了！");
+			DecimalFormat df1 = new DecimalFormat("######0"); //四色五入转换成整数
+			BigDecimal payAmt=new BigDecimal(entity.getV_txnAmt()).setScale(2, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100));
+			TreeMap<String, String> params = new TreeMap<String, String>();
+			Map<String, String> map =new HashMap<>();
+			params.put("pickupUrl", BaseUtil.url+"/gateWay/sqReturnUrl.action");
+			params.put("receiveUrl", BaseUtil.url+"/gateWay/sqNotifyUrl.action");
+				params.put("orderNo", entity.getV_oid());
+			params.put("orderAmount", df1.format(payAmt));
+			params.put("orderCurrency", "156");
+			params.put("orderDateTime", entity.getV_time());
+			params.put("productName", entity.getV_productName());
+			params.put("payType", "1");
+			params.put("issuerId", "00000000");
+			
+			String paramSrc = RequestUtils.getParamSrc(params);
+			log.info("上传上游前生成签名字符串:" + paramSrc);
+			String sign = MD5Utils.sign(paramSrc, pmsBusinessPos.getKek(), "UTF-8");//
+			log.info("sign:" + sign);
+			map.put("sign",sign);
+			map.put("signType", "1");
+			map.put("merchantId", pmsBusinessPos.getBusinessnum());//
+			JSONObject json= new JSONObject();
+			
+			json.put("content", JSON.toJSON(params));
+			json.put("head", JSON.toJSON(map));	
+			log.info("上传之前参数："+json);
+			String urls ="";
+			if("903110153110001".equals(pmsBusinessPos.getBusinessnum())) {
+				urls="https://ipay.chinasmartpay.cn/openapi/merchantPayment/order";
+			}else {
+				urls="https://openapi.openepay.com/openapi/merchantPayment/order";
+			}
+			
+			String respJson = RequestUtils.sendHttpPostRequest(urls, json.toString(),false);
+			log.info("开联通请求返回参数:"+respJson);
+			
+			return result;
+		}
 	
 	/**
 	 * 双乾网关异步响应信息

@@ -41,7 +41,7 @@ package xdt.dto.jp;
 			/* 45 */ resMap.remove("serverCert");
 			/* 46 */ resMap.remove("serverSign");
 			/* 47 */ res = BeanUtil.mapToStr(resMap);
-			/* 48 */ if (!(rsaSignUtil.verify(res, serverSign, serverCert, "UTF-8"))) {
+			/* 48 */ if (!(rsaSignUtil.verify(res, serverSign, serverCert, "UTF-8", serverSign))) {
 				/* 49 */ return "验签失败";
 				/*    */ }
 			/* 51 */ return BeanUtil.mapToJson(resMap);
