@@ -2937,6 +2937,311 @@ public class TotalPayController extends BaseAction {
 		}
 		return map;
 	}
+
+	
+	/**
+	 * 九派代付异步通知
+	 * @param response
+	 * @param request
+	 * @throws IOException 
+	 */
+	@RequestMapping(value="JPNotifyUrl")
+	public void JPNotifyUrl(HttpServletResponse response,HttpServletRequest request, Object responseObject) throws IOException {
+	    log.info("九派代付异步来了！");	  	    
+	    String orderId=request.getParameter("orderNo");//订单号
+	    String orderStatus=request.getParameter("orderSts");//订单状态，S:成功;F:失败;P:处理中;N:待人工处理   	
+    	logger.info("订单号="+orderId);
+    	logger.info("订单状态="+orderStatus);
+    	
+		Map<String, String> maps =new HashMap<>();
+		request.getSession();
+		ChannleMerchantConfigKey keyinfo=new ChannleMerchantConfigKey();
+		OriginalOrderInfo originalInfo=null;
+		response.setCharacterEncoding("UTF-8");  
+		response.setContentType("application/json; charset=utf-8");  
+		String str="";
+		if(orderId!=null&&orderId!=""&&orderStatus!=null&&orderStatus!="") {	
+			str="result=SUCCESS";
+			outString(response,str);
+		    
+			PmsDaifuMerchantInfo pmsDaifuMerchantInfo =new PmsDaifuMerchantInfo();
+			pmsDaifuMerchantInfo.setBatchNo(orderId);
+			List<PmsDaifuMerchantInfo> pmsDaifuMerchantInfos =service.selectDaifu(pmsDaifuMerchantInfo);
+			String type="";
+			if("D0".equals(pmsDaifuMerchantInfos.get(0).getRemarks())){
+				type="0";
+			}else if("T1".equals(pmsDaifuMerchantInfos.get(0).getRemarks())) {
+				type="1";
+			}
+								
+			try {
+					originalInfo  = this.gateWayService.getOriginOrderInfos(orderId);
+					keyinfo = clientCollectionPayService.getChannelConfigKey(originalInfo.getPid());
+			} catch (Exception e) {
+				
+				e.printStackTrace();
+			}
+			log.info("九派代付原始订单数据:" + JSON.toJSON(originalInfo));			
+			log.info("九派代付下游的异步地址" + originalInfo.getBgUrl());
+			
+			maps.put("v_mid", originalInfo.getPid());
+			maps.put("v_oid", originalInfo.getOrderId());
+			maps.put("v_txnAmt", originalInfo.getOrderAmount());
+			maps.put("v_attach", originalInfo.getAttach());
+			maps.put("v_code", "00");
+			maps.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+
+			
+			if("S".equals(orderStatus)) {
+				maps.put("v_status", "0000");
+				maps.put("v_msg", "代付成功");
+				try {
+					service.UpdateDaifu(originalInfo.getOrderId(), "00");
+					log.info("九派代付修改成功代付状态成功！");
+				} catch (Exception e) {
+					log.info("九派代付修改成功代付状态异常："+e);
+					e.printStackTrace();
+				}
+			}else if("F".equals(orderStatus)){
+			    maps.put("v_status", "1001");
+				maps.put("v_msg", "代付失败");
+			  
+				try {
+					service.UpdateDaifu(originalInfo.getOrderId(), "02");
+					log.info("九派代付修改失败代付状态成功！");
+				} catch (Exception e) {
+					log.info("九派代付修改失败代付状态异常："+e);
+					e.printStackTrace();
+				}
+				Map<String, String> map =new HashMap<>();
+				map.put("machId",originalInfo.getPid());
+				map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))*100+"");
+				int nus =0;
+				if("0".equals(type)) {
+					nus =service.updataPay(map);
+				}else if("1".equals(type)){
+					nus =service.updataPayT1(map);
+				}
+				if(nus==1) {
+					log.info("九派代付补款成功");
+					DaifuRequestEntity entity =new DaifuRequestEntity();
+	 				entity.setV_mid(pmsDaifuMerchantInfos.get(0).getMercId());
+	 				entity.setV_batch_no(pmsDaifuMerchantInfos.get(0).getBatchNo()+"/A");
+	 				entity.setV_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+	 				entity.setV_sum_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+	 				entity.setV_identity(pmsDaifuMerchantInfos.get(0).getIdentity());
+	 				entity.setV_cardNo(pmsDaifuMerchantInfos.get(0).getCardno());
+	 				entity.setV_city(pmsDaifuMerchantInfos.get(0).getCity());
+	 				entity.setV_province(pmsDaifuMerchantInfos.get(0).getProvince());
+	 				entity.setV_type(type);
+	 				entity.setV_pmsBankNo(pmsDaifuMerchantInfos.get(0).getPmsbankno());
+	 				PmsMerchantInfo merchantinfo =new PmsMerchantInfo();
+					int ii;
+					try {
+						ii = service.add(entity, merchantinfo, maps, "00");
+						log.info("九派代付补款订单状态："+ii);
+					} catch (Exception e) {
+						log.info("九派代付补款状态异常："+e);
+						e.printStackTrace();
+					}
+					
+				}else {
+					log.info("九派代付补款失败");
+				}
+			}else if("N".equals(orderStatus)) {
+				log.info("九派代付订单，待人工处理");
+			}
+				
+			ScanCodeResponseEntity consume = (ScanCodeResponseEntity) BeanToMapUtil
+					.convertMap(ScanCodeResponseEntity.class, maps);
+			String signs = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
+			maps.put("v_sign", signs);
+			String params = HttpURLConection.parseParams(maps);
+			log.info("九派代付给下游异步的数据:" + params);
+			String html;
+			try {
+				html = HttpClientUtil.post(originalInfo.getBgUrl(), params);
+				logger.info("下游返回状态" + html);
+				JSONObject ob = JSONObject.fromObject(html);
+				Iterator it = ob.keys();
+				Map<String, String> resp = new HashMap<>();
+				while (it.hasNext()) {
+					String keys = (String) it.next();
+					if (keys.equals("success")) {
+						String value = ob.getString(keys);
+						logger.info("异步回馈的结果:"+ value);
+						resp.put("success", value);
+					}
+				}
+				if (!resp.get("success").equals("true")) {
+					
+					logger.info("启动线程进行异步通知");
+					// 启线程进行异步通知
+					ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(), params));
+					logger.info("九派代付向下游 发送数据成功");
+				}
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}else {
+			logger.info("异步参数为空");
+			str="result=FAIL";
+			outString(response,str);
+		}
+	}
 	
 
+	/**
+	 * 开联通代付异步通知
+	 * @param response
+	 * @param request
+	 * @throws IOException 
+	 */
+	@RequestMapping(value="KLTNotifyUrl")
+	public void KLTNotifyUrl(HttpServletResponse response,HttpServletRequest request, Object responseObject) throws IOException {
+	    log.info("开联通代付异步来了！");	  
+	    
+	    String orderId=request.getParameter("merchantOrderId");//订单号
+    	String orderStatus=request.getParameter("orderStatus");//订单状态
+    	String errorCode=request.getParameter("errorCode");//交易错误码
+    	String errorMsg=request.getParameter("errorMsg");//交易错误信息
+    	
+    	logger.info("订单号="+orderId);
+    	logger.info("订单状态="+orderStatus);//订单状态,0：处理中，1：成功，2：失败
+    	logger.info("交易错误码="+errorCode);
+    	logger.info("交易错误信息="+errorMsg);
+		
+		Map<String, String> maps =new HashMap<>();
+		request.getSession();
+		ChannleMerchantConfigKey keyinfo=new ChannleMerchantConfigKey();
+		OriginalOrderInfo originalInfo=null;
+		response.setCharacterEncoding("UTF-8");  
+		response.setContentType("application/json; charset=utf-8");  
+		if(errorCode!=null&&errorCode!=""&&errorCode.equals("000000")&&orderStatus!=null&&orderStatus!="") {	
+			outString(response,"success");
+		    
+			PmsDaifuMerchantInfo pmsDaifuMerchantInfo =new PmsDaifuMerchantInfo();
+			pmsDaifuMerchantInfo.setBatchNo(orderId);
+			List<PmsDaifuMerchantInfo> pmsDaifuMerchantInfos =service.selectDaifu(pmsDaifuMerchantInfo);
+			String type="";
+			if("D0".equals(pmsDaifuMerchantInfos.get(0).getRemarks())){
+				type="0";
+			}else if("T1".equals(pmsDaifuMerchantInfos.get(0).getRemarks())) {
+				type="1";
+			}
+								
+			try {
+					originalInfo  = this.gateWayService.getOriginOrderInfos(orderId);
+					keyinfo = clientCollectionPayService.getChannelConfigKey(originalInfo.getPid());
+			} catch (Exception e) {
+				
+				e.printStackTrace();
+			}
+			log.info("开联通代付原始订单数据:" + JSON.toJSON(originalInfo));			
+			log.info("开联通代付下游的异步地址" + originalInfo.getBgUrl());
+			
+			maps.put("v_mid", originalInfo.getPid());
+			maps.put("v_oid", originalInfo.getOrderId());
+			maps.put("v_txnAmt", originalInfo.getOrderAmount());
+			maps.put("v_attach", originalInfo.getAttach());
+			maps.put("v_code", "00");
+			maps.put("v_time", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));
+
+			
+			if("1".equals(orderStatus)) {
+				maps.put("v_status", "0000");
+				maps.put("v_msg", "代付成功");
+				try {
+					service.UpdateDaifu(originalInfo.getOrderId(), "00");
+					log.info("开联通代付修改成功代付状态成功！");
+				} catch (Exception e) {
+					log.info("开联通代付修改成功代付状态异常："+e);
+					e.printStackTrace();
+				}
+			}else if("2".equals(orderStatus)){
+			    maps.put("v_status", "1001");
+				maps.put("v_msg", "代付失败");
+			  
+				try {
+					service.UpdateDaifu(originalInfo.getOrderId(), "02");
+					log.info("开联通代付修改失败代付状态成功！");
+				} catch (Exception e) {
+					log.info("开联通代付修改失败代付状态异常："+e);
+					e.printStackTrace();
+				}
+				Map<String, String> map =new HashMap<>();
+				map.put("machId",originalInfo.getPid());
+				map.put("payMoney",(Double.parseDouble(pmsDaifuMerchantInfos.get(0).getAmount())+Double.parseDouble(pmsDaifuMerchantInfos.get(0).getPayCounter()))*100+"");
+				int nus =0;
+				if("0".equals(type)) {
+					nus =service.updataPay(map);
+				}else if("1".equals(type)){
+					nus =service.updataPayT1(map);
+				}
+				if(nus==1) {
+					log.info("开联通代付补款成功");
+					DaifuRequestEntity entity =new DaifuRequestEntity();
+	 				entity.setV_mid(pmsDaifuMerchantInfos.get(0).getMercId());
+	 				entity.setV_batch_no(pmsDaifuMerchantInfos.get(0).getBatchNo()+"/A");
+	 				entity.setV_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+	 				entity.setV_sum_amount(pmsDaifuMerchantInfos.get(0).getAmount());
+	 				entity.setV_identity(pmsDaifuMerchantInfos.get(0).getIdentity());
+	 				entity.setV_cardNo(pmsDaifuMerchantInfos.get(0).getCardno());
+	 				entity.setV_city(pmsDaifuMerchantInfos.get(0).getCity());
+	 				entity.setV_province(pmsDaifuMerchantInfos.get(0).getProvince());
+	 				entity.setV_type(type);
+	 				entity.setV_pmsBankNo(pmsDaifuMerchantInfos.get(0).getPmsbankno());
+	 				PmsMerchantInfo merchantinfo =new PmsMerchantInfo();
+					int ii;
+					try {
+						ii = service.add(entity, merchantinfo, maps, "00");
+						log.info("开联通代付补款订单状态："+ii);
+					} catch (Exception e) {
+						log.info("开联通代付补款状态异常："+e);
+						e.printStackTrace();
+					}
+					
+				}else {
+					log.info("开联通代付补款失败");
+				}
+			}
+				
+			ScanCodeResponseEntity consume = (ScanCodeResponseEntity) BeanToMapUtil
+					.convertMap(ScanCodeResponseEntity.class, maps);
+			String signs = SignatureUtil.getSign(beanToMap(consume), keyinfo.getMerchantkey(), log);
+			maps.put("v_sign", signs);
+			String params = HttpURLConection.parseParams(maps);
+			log.info("开联通代付给下游异步的数据:" + params);
+			String html;
+			try {
+				html = HttpClientUtil.post(originalInfo.getBgUrl(), params);
+				logger.info("下游返回状态" + html);
+				JSONObject ob = JSONObject.fromObject(html);
+				Iterator it = ob.keys();
+				Map<String, String> resp = new HashMap<>();
+				while (it.hasNext()) {
+					String keys = (String) it.next();
+					if (keys.equals("success")) {
+						String value = ob.getString(keys);
+						logger.info("异步回馈的结果:"+ value);
+						resp.put("success", value);
+					}
+				}
+				if (!resp.get("success").equals("true")) {
+					
+					logger.info("启动线程进行异步通知");
+					// 启线程进行异步通知
+					ThreadPool.executor(new MbUtilThread(originalInfo.getBgUrl(), params));
+					logger.info("开联通代付向下游 发送数据成功");
+				}
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}else {
+			logger.info("请求失败");
+			outString(response,"fail");
+		}
+	}
 }
