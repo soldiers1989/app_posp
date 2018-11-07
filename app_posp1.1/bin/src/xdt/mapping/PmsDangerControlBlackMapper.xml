@@ -1,0 +1,96 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<!DOCTYPE mapper
+PUBLIC '-//mybatis.org//DTD Mapper 3.0//EN'
+'http://mybatis.org/dtd/mybatis-3-mapper.dtd'>
+<mapper namespace='xdt.mapping.PmsDangerControlBlackMapper'>
+
+	<resultMap type="xdt.model.PmsDangerControlBlack" id="resultMap">
+		<id column="id" property="id" />
+		<result column="cardNo" property="cardNo" />
+		<result column="realname" property="realname" />
+		<result column="certNo" property="certNo" />
+		<result column="addTime" property="addTime" />
+		<result column="addAgentNumber" property="addAgentNumber" />
+		<result column="remarks" property="remarks" />
+		<result column="startDate" property="startDate" />
+		<result column="endDate" property="endDate" />
+		<result column="MERCID" property="mercId" />
+	</resultMap>
+
+	<!-- 公用的判断条 -->
+	<sql id="configParamSql">
+					<if test="searchBean.cardNo !=null  and  searchBean.cardNo!=''">
+							and obj.cardNo  like '%'||#{searchBean.cardNo}||'%'
+						</if>
+					<if test="searchBean.realname !=null  and  searchBean.realname!=''">
+							and obj.realname  like '%'||#{searchBean.realname}||'%'
+						</if>
+					<if test="searchBean.certNo !=null  and  searchBean.certNo !=''">
+							and obj.certNo  like '%'||#{searchBean.certNo}||'%'
+						</if>
+					<if
+						test="searchBean.startDate !=null  and  searchBean.startDate!='' and searchBean.endDate !=null  and  searchBean.endDate!=''">
+						and substr(obj.addTime,0,10) between
+						#{searchBean.startDate} and #{searchBean.endDate}
+					</if>
+					<if test="searchBean.addAgentNumber !=null  and  searchBean.addAgentNumber !=''">
+							and obj.addAgentNumber=#{searchBean.addAgentNumber}
+						</if>
+					<if test="searchBean.remarks !=null  and  searchBean.remarks!=''">
+							and obj.remarks=#{searchBean.remarks}
+					</if>
+	</sql>
+
+	<select id="selectList" resultMap="resultMap" parameterType="xdt.model.PmsDangerControlBlack">
+		select * from pms_danger_control_black
+		<where>
+			<if test="mercId !=null  and  mercId !=''">
+				and MERCID=#{mercId}
+			</if>
+			<if test="cardNo !=null  and  cardNo !=''">
+				and cardNo=#{cardNo}
+			</if>
+			<if test="realname !=null  and  realname !=''">
+				and realname=#{realname}
+			</if>
+			<if test="certNo !=null  and  certNo !=''">
+				and certNo=#{certNo}
+			</if>
+			<if test="addAgentNumber !=null  and  addAgentNumber !=''">
+				and addAgentNumber=#{addAgentNumber}
+			</if>
+			<if test="remarks !=null  and  remarks !=''">
+				and remarks=#{remarks}
+			</if>
+		</where>
+	</select>
+	<insert id="save" parameterType="xdt.model.PmsDangerControlBlack">
+		<selectKey resultType="java.lang.Integer" keyProperty="id"
+			order="BEFORE">
+			select seq_pms_danger_control_black.NEXTVAL from dual
+		</selectKey>
+		<![CDATA[insert into pms_danger_control_black(cardNo,realname,certNo,addTime,addAgentNumber,remarks)
+		values(trim(#{cardNo,jdbcType=VARCHAR}),trim(#{realname,jdbcType=VARCHAR}),trim(#{certNo,jdbcType=VARCHAR}),trim(#{addTime,jdbcType=VARCHAR}),trim(#{addAgentNumber,jdbcType=INTEGER}),trim(#{remarks,jdbcType=VARCHAR}))]]>
+	</insert>
+	
+	<delete id="delete" parameterType="java.lang.Integer">
+		delete from pms_danger_control_black
+		where id=#{id}
+	</delete>
+	<!-- 根据证件号修改 -->
+	<update id='update' parameterType='xdt.model.PmsDangerControlBlack'>
+		update pms_danger_control_black set
+		certNo =
+		#{certNo,jdbcType=VARCHAR},
+		realname =
+		#{realname,jdbcType=VARCHAR},
+		addTime =
+		#{addTime,jdbcType=VARCHAR},
+		addAgentNumber =
+		#{addAgentNumber,jdbcType=VARCHAR},
+		remarks =
+		#{remarks,jdbcType=VARCHAR}
+		where cardNo=#{cardNo,jdbcType=INTEGER}
+	</update>
+</mapper>
+
