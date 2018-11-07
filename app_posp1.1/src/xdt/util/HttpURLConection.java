@@ -13,6 +13,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
 import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
@@ -327,7 +328,15 @@ public class HttpURLConection {
             if (i > 0) {
                 param += "&";
             }
-            param += key + "=" + params.get(key);
+//            param += key + "=" + params.get(key);
+            String str = params.get(key);
+            try {
+				str = URLEncoder.encode(str, "UTF-8");
+			} catch (UnsupportedEncodingException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+            param += key + "=" +str;
             i++;
         }
         return param;

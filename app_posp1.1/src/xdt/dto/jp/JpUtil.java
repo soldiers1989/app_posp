@@ -14,10 +14,10 @@ public class JpUtil {
 	public static final String responseUrl=BaseUtil.url+"/JPController/responseUrl.action";//代付异步
 	
 	
-	public static final String service="rpmBankPayment";
+	public static final String service="singleTransfer";
 	public static final String pay="singleTransfer";
 	public static final String payUrlTest="http://43.227.141.32/paygateway/mpsGate/mpsTransaction";//代付测试环境
-	public static final String payUrl="https://jd.kingpass.cn/paygateway/mpsGate/mpsTransaction";//代付测试环境
+	public static final String payUrl="https://jd.jiupaipay.com/paygateway/mpsGate/mpsTransaction";//代付正式环境
 	
 	public static final String cardUrlTest="http://43.227.141.32/paygateway/paygateway/bankPayment";//支付测试环境
 	public static final String cardUrl="https://jd.kingpass.cn/paygateway/paygateway/bankPayment";//支付生产环境
