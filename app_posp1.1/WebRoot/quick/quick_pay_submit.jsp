@@ -17,6 +17,7 @@ String basePath = request.getScheme()+"://"+request.getServerName()+":"+request.
 		<input type="text" name="v_time" value="${temp.v_time}"><br>
 		<input type="text" name="v_smsCode" value="${temp.v_smsCode}"><br>
 		<input type="text" name="v_type" value="${temp.v_type}"><br>
+		<input type="text" name="v_eventID" value="${temp.v_eventID}"><br>
 		<input type="text" name="v_sign" value="${temp.v_sign}"><br>
 	</form>
 </body>

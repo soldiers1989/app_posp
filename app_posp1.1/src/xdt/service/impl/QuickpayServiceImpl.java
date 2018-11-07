@@ -17,12 +17,14 @@ import com.etonepay.b2c.utils.MD5;
 import com.innovatepay.merchsdk.DefaultChinaInPayClient;
 import com.innovatepay.merchsdk.request.ChinaInPayQuickPayRequest;
 import com.innovatepay.merchsdk.request.ChinaInPayRequest;
+import com.jiupai.paysdk.entity.requestDTO.FaceEventRegisterDTO;
 import com.jiupai.paysdk.entity.requestDTO.RpmBindCardCommitDTO;
 import com.jiupai.paysdk.entity.requestDTO.RpmBindCardInitDTO;
 import com.jiupai.paysdk.entity.requestDTO.RpmQuickPayCommitDTO;
 import com.jiupai.paysdk.entity.requestDTO.RpmQuickPayInitDTO;
 import com.jiupai.paysdk.service.impl.BaseJiupayServiceImpl;
 import com.jiupai.paysdk.service.interfaces.BaseJiupayService;
+import com.jiupai.paysdk.utils.des.DesUtils;
 import com.kspay.AESUtil;
 import com.kspay.MD5Util;
 import com.sun.jndi.toolkit.url.Uri;
@@ -69,6 +71,9 @@ import xdt.dto.hm.HMUtil;
 import xdt.dto.hm.HttpsUtil;
 import xdt.dto.hm.SHA256Util;
 import xdt.dto.hm.TimeUtil;
+import xdt.dto.jp.JpUtil;
+import xdt.dto.jp.MerchantUtil;
+import xdt.dto.jp.RSASignUtil;
 import xdt.dto.lhzf.LhzfUtil;
 import xdt.dto.lhzf.MerchantApiUtil;
 import xdt.dto.mb.DemoBase;
@@ -406,7 +411,7 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 
 		OriginalOrderInfo original = null;
 		// 查询流水信息
-		PospTransInfo transInfo = pospTransInfoDAO.searchBytransOrderId(tranId);
+		PospTransInfo transInfo = pospTransInfoDAO.searchByOrderId(tranId);
 		String oderId = transInfo.getOrderId();
 		logger.info("根据上送订单号  查询商户上送原始信息");
 		original = originalDao.getOriginalOrderInfoByOrderid(oderId);
@@ -906,8 +911,7 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 										}
 										logger.info("修改订单信息");
 										logger.info(pmsAppTransInfo);
-										insertProfit(originalinfo.getV_oid(), originalinfo.getV_txnAmt(), merchantinfo,
-												PaymentCodeEnum.moBaoQuickPay.getTypeName(), originalinfo.getV_type());
+										//insertProfit(originalinfo.getV_oid(), originalinfo.getV_txnAmt(), merchantinfo,PaymentCodeEnum.moBaoQuickPay.getTypeName(), originalinfo.getV_type());
 										int num = pmsAppTransInfoDao.update(pmsAppTransInfo);
 										if (num > 0) {
 
@@ -6760,6 +6764,7 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 				// 更新流水表
 				pospTransInfo.setResponsecode("00");
 				pospTransInfo.setPospsn(result.getV_oid());
+				pospTransInfo.setTransOrderId(result.getV_attach());
 				logger.info("更新流水");
 				logger.info(pospTransInfo);
 				pospTransInfoDAO.updateByOrderId(pospTransInfo);
@@ -6775,6 +6780,23 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 				// 更新流水表
 				pospTransInfo.setResponsecode("02");
 				pospTransInfo.setPospsn(result.getV_oid());
+				pospTransInfo.setTransOrderId(result.getV_attach());
+				logger.info("更新流水");
+				logger.info(pospTransInfo);
+				pospTransInfoDAO.updateByOrderId(pospTransInfo);
+			}
+		} else if ("200".equals(result.getV_status().toString())) {
+			// 支付失败
+			pmsAppTransInfo.setStatus(OrderStatusEnum.waitingClientPay.getStatus());
+			pmsAppTransInfo.setThirdPartResultCode(result.getV_msg().toString());
+			pmsAppTransInfo.setFinishtime(UtilDate.getDateFormatter());
+			// 修改订单
+			int updateAppTrans = pmsAppTransInfoDao.update(pmsAppTransInfo);
+			if (updateAppTrans == 1) {
+				// 更新流水表
+				pospTransInfo.setResponsecode("20");
+				pospTransInfo.setPospsn(result.getV_oid());
+				pospTransInfo.setTransOrderId(result.getV_attach());
 				logger.info("更新流水");
 				logger.info(pospTransInfo);
 				pospTransInfoDAO.updateByOrderId(pospTransInfo);
@@ -7547,14 +7569,34 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 	        dto.setCheckCode(entity.getV_smsCode());
 	        dto.setEventID("");
 	        String url ="https://jd.jiupaipay.com/paygateway/";
-	        url=url+"rpmBindCardCommit";
 	        String merchantCert =new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".p12";//.p12
 	        String merchantPass=pmsBusinessPos.getKek();//证书密码
 	        String rootcerPath=new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".cer";//.cer
-	        String str = baseJiupayService.doSend(RPMBINDCARDCOMMIT,dto,merchantCert,merchantPass,rootcerPath,url);
-	        logger.info("九派发送绑卡返回参数:"+str);
+	        String res = baseJiupayService.doSend(RPMBINDCARDCOMMIT,dto,merchantCert,merchantPass,rootcerPath,url);
+	        logger.info("九派发送绑卡返回参数:"+res);
+	        result.put("v_version", entity.getV_oid());
+	        result.put("v_verifyId", entity.getV_verifyId());
+			result.put("v_mid", entity.getV_mid());
+			result.put("v_oid", entity.getV_oid());
+	        if(!"".equals(res)){
+	        	JSONObject json =JSONObject.parseObject(res);
+	        	if("IPS00000".equals(json.getString("rspCode"))) {
+	        		result.put("v_code", "00");
+		        	result.put("v_msg", "请求成功");
+	        		result.put("v_cardSts", json.getString("cardSts"));//卡状态
+	        	}else {
+	        		result.put("v_code", "01");
+		        	result.put("v_msg", json.getString("rspMessage"));
+	        	}
+	        	
+	        }else {
+	        	result.put("v_code", "01");
+	        	result.put("v_msg", "请求异常");
+	        }
 		} catch (Exception e) {
-			
+			e.printStackTrace();
+			result.put("v_code", "01");
+        	result.put("v_msg", "请求异常");
 		}
 		
         
@@ -7562,12 +7604,11 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 	}
 	//九派快捷绑卡获取短信
 	public void jpQuickcard(PmsBusinessPos pmsBusinessPos,MessageRequestEntity entity,Map<String, String> result) {
-		
 		try {
-			BaseJiupayService baseJiupayService = new BaseJiupayServiceImpl();
+			BaseJiupayServiceImpl baseJiupayService = new BaseJiupayServiceImpl();
 			RpmBindCardInitDTO dto = new RpmBindCardInitDTO();
-	        dto.setMerchantId(entity.getV_userId());
-	        dto.setMemberId(pmsBusinessPos.getBusinessnum());
+	        dto.setMerchantId(pmsBusinessPos.getBusinessnum());
+	        dto.setMemberId(entity.getV_userId());
 	        dto.setOrderId(entity.getV_oid());
 	        dto.setIdType("00");
 	        dto.setIdNo(entity.getV_cert_no());
@@ -7579,20 +7620,44 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 	        dto.setCvn2(entity.getV_cvn2()==null?"":entity.getV_cvn2());
 	        dto.setSubMerchantId("");
 	        String url ="https://jd.jiupaipay.com/paygateway/";
-	        url=url+"rpmBindCardInit";
-	        String merchantCert =new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".p12";//.p12
+	        String merchantCertPath =new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".p12";//.p12
 	        String merchantPass=pmsBusinessPos.getKek();//证书密码
 	        String rootcerPath=new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".cer";//.cer
-	        String str =baseJiupayService.doSend(RPMBINDCARDINIT,dto,merchantCert,merchantPass,rootcerPath,url);
-	        logger.info("九派发送短信绑卡返回参数:"+str);
+ 	        String res =baseJiupayService.doSend(RPMBINDCARDINIT,dto,merchantCertPath,merchantPass,rootcerPath,url);
+	        logger.info("九派发送短信绑卡返回参数:"+res);
+	        result.put("v_version", entity.getV_oid());
+	        result.put("v_userId", entity.getV_userId());
+			result.put("v_mid", entity.getV_mid());
+			result.put("v_oid", entity.getV_oid());
+	        if(!"".equals(res)){
+	        	JSONObject json =JSONObject.parseObject(res);
+	        	if("IPS00000".equals(json.getString("rspCode"))) {
+	        		result.put("v_code", "00");
+		        	result.put("v_msg", "请求成功");
+	        		result.put("v_bankName", json.getString("bankName"));
+	        		result.put("v_verifyId", json.getString("contractId"));//协议号
+	        		result.put("v_cardSts", json.getString("cardSts"));//卡状态
+	        	}else {
+	        		result.put("v_code", "01");
+		        	result.put("v_msg", json.getString("rspMessage"));
+	        	}
+	        	
+	        }else {
+	        	result.put("v_code", "01");
+	        	result.put("v_msg", "请求异常");
+	        }
+	        
+	        
 		} catch (Exception e) {
-			// TODO: handle exception
+			e.printStackTrace();
+			result.put("v_code", "01");
+        	result.put("v_msg", "请求异常");
 		}
 		
         
         
 	}
-	public void jpQuick(MessageRequestEntity entity,PmsBusinessPos pmsBusinessPos,Map<String, String> retMap) {
+	public void jpQuick(MessageRequestEntity entity,PmsBusinessPos pmsBusinessPos,Map<String, String> result) {
 		try {
 			BaseJiupayService baseJiupayService = new BaseJiupayServiceImpl();
 			RpmQuickPayInitDTO dto = new RpmQuickPayInitDTO();
@@ -7616,8 +7681,8 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 	        dto.setOrderDetail(entity.getV_productDesc());
 	        dto.setTradeUse("线下购物");
 	        dto.setTradeAbstract("线下购买商品支付");
-	        dto.setBusTypeScene("互联网金融");
-	        dto.setBusTypeCode("03");
+	        dto.setBusTypeScene("01");
+	        dto.setBusTypeCode("100001");
 	        dto.setExtData("{\"mercPayContractNo\":\"20180420albc\"}");
 	        dto.setValidUnit("00");
 	        dto.setValidNum("30");
@@ -7628,38 +7693,72 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 	        dto.setQrMerchantId("");
 	        dto.setFaceFlag("");
 	        String url ="https://jd.jiupaipay.com/paygateway/";
-	        url=url+"rpmQuickPayInit";
 	        String merchantCert =new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".p12";//.p12
 	        String merchantPass=pmsBusinessPos.getKek();//证书密码
 	        String rootcerPath=new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".cer";//.cer
-	        String str =baseJiupayService.doSend(RPMQUICKPAYINIT,dto,merchantCert,merchantPass,rootcerPath,url);
-	        logger.info("九派发送绑卡返回参数:"+str);
+	        String res =baseJiupayService.doSend(RPMQUICKPAYINIT,dto,merchantCert,merchantPass,rootcerPath,url);
+	        logger.info("九派发送绑卡返回参数:"+res);
+	        result.put("v_version", entity.getV_oid());
+	        result.put("v_userId", entity.getV_userId());
+			result.put("v_mid", entity.getV_mid());
+			result.put("v_oid", entity.getV_oid());
+			result.put("v_txnAmt", entity.getV_txnAmt());
+			result.put("v_time", entity.getV_time());
+	        if(!"".equals(res)){
+	        	JSONObject json =JSONObject.parseObject(res);
+	        	ConsumeResponseEntity responseEntity =new ConsumeResponseEntity();
+	        	responseEntity.setV_code("00");
+	        	responseEntity.setV_mid(entity.getV_mid());
+	        	responseEntity.setV_status("200");
+	        	responseEntity.setV_oid(entity.getV_oid());
+	        	if("IPS00000".equals(json.getString("rspCode"))) {
+	        		result.put("v_code", "00");
+		        	result.put("v_msg", "请求成功");
+		        	
+		        	responseEntity.setV_attach(json.getString("payOrderId"));
+		        	responseEntity.setV_msg(json.getString("rspMessage"));
+		        	
+	        	}else {
+	        		result.put("v_code", "01");
+		        	result.put("v_msg", json.getString("rspMessage"));
+		        	responseEntity.setV_msg(json.getString("rspMessage"));
+	        	}
+	        	otherInvoke(responseEntity);
+	        }else {
+	        	result.put("v_code", "01");
+	        	result.put("v_msg", "请求异常");
+	        }
+	        
+	        
 		} catch (Exception e) {
-			// TODO: handle exception
+			e.printStackTrace();
+			result.put("v_code", "01");
+        	result.put("v_msg", "请求异常");
 		}
 		
 	}
 	
 	@SuppressWarnings("null")
-	public void jpQuickPay(ConsumeRequestEntity entity,PmsBusinessPos pmsBusinessPos,Map<String, String> retMap) {
+	public void jpQuickPay(ConsumeRequestEntity entity,PmsBusinessPos pmsBusinessPos,Map<String, String> result) {
 		
 		
 		OriginalOrderInfo originalOrderInfo=null;
 		try {
 			originalOrderInfo = getOriginOrderInfo(entity.getV_oid());
 			
-			if(originalOrderInfo!=null) {
-				retMap.put("v_code", "15");
-				retMap.put("v_msg", "请求失败,订单号错误");
+			if(originalOrderInfo==null) {
+				result.put("v_code", "15");
+				result.put("v_msg", "请求失败,订单号错误");
 			}else {
-				BaseJiupayService baseJiupayService = new BaseJiupayServiceImpl();
+				xdt.dto.jp.BaseJiupayServiceImpl baseJiupayService = new xdt.dto.jp.BaseJiupayServiceImpl();
 				DecimalFormat df1 = new DecimalFormat("######0"); //四色五入转换成整数
 				BigDecimal payAmt=new BigDecimal(originalOrderInfo.getOrderAmount()).setScale(2, BigDecimal.ROUND_HALF_UP).multiply(new BigDecimal(100));
 				RpmQuickPayCommitDTO dto = new RpmQuickPayCommitDTO();
 		        dto.setMerchantId(pmsBusinessPos.getBusinessnum());
 		        dto.setMemberId(originalOrderInfo.getUserId());
 		        dto.setOrderId(originalOrderInfo.getOrderId());
-		        dto.setContractId(entity.getV_verifyId());
+		        dto.setContractId(originalOrderInfo.getVerifyId());
+		        dto.setCheckCode(entity.getV_smsCode());
 		        dto.setPayType("DQP");
 		        dto.setAmount(df1.format(payAmt));
 		        dto.setCurrency("CNY");
@@ -7669,22 +7768,161 @@ public class QuickpayServiceImpl extends BaseServiceImpl implements IQuickPaySer
 		        dto.setValidNum("30");
 		        dto.setGoodsName(originalOrderInfo.getProcdutDesc());
 		        dto.setGoodsDesc("");
+		        dto.setEventID(entity.getV_eventID());
 		        dto.setOfflineNotifyUrl(BaseUtil.url+"/quickPayAction/jpNotifyUrl.action");
 		        String url ="https://jd.jiupaipay.com/paygateway/";
-		        url=url+"rpmQuickPayCommit";
 		        String merchantCert =new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".p12";//.p12
 		        String merchantPass=pmsBusinessPos.getKek();//证书密码
 		        String rootcerPath=new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".cer";//.cer
-		        String str =baseJiupayService.doSend(RPMQUICKPAYCOMMIT,dto,merchantCert,merchantPass,rootcerPath,url);
-		        
+		        String res =baseJiupayService.doSend(RPMQUICKPAYCOMMIT,dto,merchantCert,merchantPass,rootcerPath,url);
+		        logger.info("九派确认支付返回参数:"+res);
+		        result.put("v_version", entity.getV_oid());
+				result.put("v_mid", entity.getV_mid());
+				result.put("v_oid", entity.getV_oid());
+				//result.put("v_txnAmt", originalOrderInfo.getOrderAmount());
+				result.put("v_time", entity.getV_time());
+		        if(!"".equals(res)){
+		        	JSONObject json =JSONObject.parseObject(res);
+		        	//ConsumeResponseEntity responseEntity =new ConsumeResponseEntity();
+		        	//responseEntity.setV_code("00");
+		        	//responseEntity.setV_mid(entity.getV_mid());
+		        	//responseEntity.setV_status("200");
+		        	//responseEntity.setV_oid(entity.getV_oid());
+		        	if("IPS00000".equals(json.getString("rspCode"))) {
+		        		result.put("v_code", "00");
+			        	result.put("v_msg", "请求成功");
+			        	
+			        	//responseEntity.setV_msg(json.getString("rspMessage"));
+			        	
+		        	}else {
+		        		result.put("v_code", "01");
+			        	result.put("v_msg", json.getString("rspMessage"));
+			        	//responseEntity.setV_msg(json.getString("rspMessage"));
+		        	}
+		        	//otherInvoke(responseEntity);
+		        }else {
+		        	result.put("v_code", "01");
+		        	result.put("v_msg", "请求异常");
+		        }
 			}
+		        
 		} catch (Exception e) {
-			
 			e.printStackTrace();
+			result.put("v_code", "01");
+        	result.put("v_msg", "请求异常");
 		}
-		
+	}
+	
+	
+	public Map<String, String> faceEventRegister(MessageRequestEntity entity,Map<String, String> result) {
+		try {
+			PmsBusinessPos pmsBusinessPos =selectKey(entity.getV_mid());
+			OriginalOrderInfo original = new OriginalOrderInfo();
+			original.setMerchantOrderId(entity.getV_oid());// 原始数据的订单编号
+			original.setOrderId(entity.getV_oid()); // 为主键
+			original.setPid(entity.getV_mid());
+			original.setOrderTime(entity.getV_time());
+			original.setOrderAmount(entity.getV_txnAmt());
+			original.setProcdutName(entity.getV_productDesc());
+			original.setProcdutDesc(entity.getV_productDesc());
+			original.setPayType(entity.getV_type());
+			original.setPageUrl(entity.getV_url());
+			original.setBgUrl(entity.getV_notify_url());
+			original.setBankNo(entity.getV_cardNo());
+			original.setRealName(entity.getV_realName());
+			if (entity.getV_cert_no() != null) {
+				original.setCertNo(entity.getV_cert_no());
+			}
+			if (entity.getV_phone() != null) {
+				original.setPhone(entity.getV_phone());
+			}
+			if (entity.getV_pmsBankNo() != null) {
+				original.setBankId(entity.getV_pmsBankNo());
+			}
+			if ("0".equals(entity.getV_userFee()) && entity.getV_userFee() != null) {
+				original.setUserFee(entity.getV_userFee());
+			}
+
+			if (entity.getV_settlePmsBankNo() != null) {
+				original.setSettlePmsBankNo(entity.getV_settlePmsBankNo());
+			}
+			if (entity.getV_settleCardNo() != null) {
+				original.setSettleCardNo(entity.getV_settleCardNo());
+			}
+			if (entity.getV_settleUserFee() != null) {
+				original.setSettleUserFee(entity.getV_settleUserFee());
+			}
+			if (entity.getV_settleName() != null) {
+				original.setSettleUserName(entity.getV_settleName());
+			}
+			if (entity.getV_cvn2() != null) {
+				original.setCvn2(entity.getV_cvn2());
+			}
+			if (entity.getV_expired() != null) {
+				original.setExpired(entity.getV_expired());
+			}
+			if (entity.getV_attach() != null) {
+				original.setAttach(entity.getV_attach());
+			}
+			if (entity.getV_userFee() != null) {
+				original.setUserFee(entity.getV_userFee());
+			}
+			logger.info("来了！222");
+			if (entity.getV_userId() != null) {
+				logger.info("来了！333");
+				original.setUserId(entity.getV_userId());
+				logger.info("来了！444");
+			}
+			logger.info("来了！555");
+			if (entity.getV_verifyId() != null) {
+				original.setVerifyId(entity.getV_verifyId());
+			}
+			original.setBankType(entity.getV_accountType());
+			originalDao.insert(original);
+			BaseJiupayServiceImpl baseJiupayService = new BaseJiupayServiceImpl();
+			FaceEventRegisterDTO dto =new FaceEventRegisterDTO();
+			dto.setMerchantId(pmsBusinessPos.getBusinessnum());
+			dto.setIdNo(DesUtils.desEnCode(entity.getV_cert_no()));
+			dto.setRealName(entity.getV_realName());
+			String returnUrl=BaseUtil.url+"/quickPayAction/jpfaceEventUrl.action?orderId="+entity.getV_oid();
+			dto.setReturnUrl(new String(org.bouncycastle.util.encoders.Base64.encode(returnUrl.getBytes())));//
+			String url ="https://jd.jiupaipay.com/paygateway/";
+	        String merchantCert =new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".p12";//.p12
+	        String merchantPass=pmsBusinessPos.getKek();//证书密码
+	        String rootcerPath=new File(this.getClass().getResource("/").getPath()).getParentFile().getParentFile().getCanonicalPath() + "//ky//" + pmsBusinessPos.getBusinessnum() + ".cer";//.cer
+	        String res =baseJiupayService.doSend(FACEEVENTREGISTER,dto,merchantCert,merchantPass,rootcerPath,url);
+	        logger.info("九派人脸识别返回参数:"+res);
 	        
-		
+	        result.put("v_version", entity.getV_oid());
+			result.put("v_mid", entity.getV_mid());
+			result.put("v_oid", entity.getV_oid());
+			result.put("v_time", entity.getV_time());
+	        if(!"".equals(res)){
+	        	JSONObject json =JSONObject.parseObject(res);
+	        	if("IPS00000".equals(json.getString("rspCode"))) {
+	        		result.put("v_code", "00");
+		        	result.put("v_msg", "请求成功");
+		        	String h5Url =new String(Base64.decode(json.getString("h5Url")));
+		        	System.out.println("h5Url:"+h5Url);
+		        	result.put("v_faceEventUrl",new String(org.bouncycastle.util.encoders.Base64.encode(h5Url.getBytes())));
+		        	result.put("v_eventId", json.getString("eventId"));
+		        	
+	        	}else {
+	        		result.put("v_code", "01");
+		        	result.put("v_msg", json.getString("rspMessage"));
+	        	}
+	        }else {
+	        	result.put("v_code", "01");
+	        	result.put("v_msg", "请求异常");
+	        }
+	        
+	        
+		} catch (Exception e) {
+			e.printStackTrace();
+			result.put("v_code", "01");
+        	result.put("v_msg", "请求异常");
+		}
+		return result;
 		
 	}
 }

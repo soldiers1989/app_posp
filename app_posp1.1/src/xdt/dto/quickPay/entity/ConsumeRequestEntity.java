@@ -25,10 +25,20 @@ public class ConsumeRequestEntity {
 	
 	private String v_type; //交易类型
 	
+	private String v_eventID;//人脸识别专用
+	
 	private String v_sign; //签名
 
 	
 
+
+	public String getV_eventID() {
+		return v_eventID;
+	}
+
+	public void setV_eventID(String v_eventID) {
+		this.v_eventID = v_eventID;
+	}
 
 	public String getV_clientIP() {
 		return v_clientIP;

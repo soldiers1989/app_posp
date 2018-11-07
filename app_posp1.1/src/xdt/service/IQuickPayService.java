@@ -118,4 +118,6 @@ public interface IQuickPayService {
 	Map<String, String> quickCard(MessageRequestEntity entity, Map<String, String> result);
 	//快捷支付绑卡短信验证
 	Map<String, String> quickCardInit(ConsumeRequestEntity entity, Map<String, String> result);
+	//人脸识别
+	Map<String, String>  faceEventRegister(MessageRequestEntity entity,Map<String, String> result);
 }

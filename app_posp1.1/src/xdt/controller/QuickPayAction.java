@@ -2168,10 +2168,15 @@ public class QuickPayAction extends BaseAction {
 			logger.info("九派快捷支付异步响应订单号：" + orderId);
 			logger.info("九派快捷支付异步响应状态码：" + rspCode);
 			logger.info("九派快捷支付异步支付状态：" + orderSts);
+			logger.info("九派快捷支付异步支付:charset=" + charset+",version="+version+",merchantId="+merchantId+",payType="+payType
+					+",signType="+signType+",serverCert="+serverCert+",serverSign="+serverSign+",memberId="+memberId
+					+",amount="+amount+",orderTime="+orderTime+",bankAbbr="+bankAbbr+",payTime="+payTime+",acDate="+acDate
+					+",fee="+fee+",responseId="+responseId+",requestId"+requestId
+					);
 			OriginalOrderInfo originalInfo = null;
-
+			request.getSession();
 			Map<String, String> result = new HashMap<String, String>();
-			if (!StringUtils.isEmpty(rspCode)) {
+			if (!StringUtils.isEmpty(orderSts)) {
 				outString(response, "SUCCESS");
 				// 查询原始订单信息
 				if (orderId != null && orderId != "") {
@@ -2184,8 +2189,6 @@ public class QuickPayAction extends BaseAction {
 				result.put("v_attach", originalInfo.getAttach());
 				result.put("v_mid", originalInfo.getPid());
 				result.put("v_time", UtilDate.getTXDateTime());
-				if ("IPS00000".equals(rspCode)) {
-					
 					if("PD".equals(orderSts)) {
 						result.put("v_status", "0000");
 						result.put("v_msg", "支付成功");
@@ -2203,12 +2206,6 @@ public class QuickPayAction extends BaseAction {
 						logger.info("交易错误码:" + orderSts + ",错误信息:"+ rspMessage);
 					}
 
-				} else {
-					result.put("v_status", "1001");
-					result.put("v_msg", "支付失败");
-					logger.info("交易错误码:" + orderSts + ",错误信息:"
-							+ rspMessage);
-				}
 				ChannleMerchantConfigKey keyinfo = quickPayService.getChannelConfigKey(originalInfo.getPid());
 				// 获取商户秘钥
 				String key = keyinfo.getMerchantkey();
@@ -2259,4 +2256,110 @@ public class QuickPayAction extends BaseAction {
 			e.printStackTrace();
 		}
 	}
+	/**
+	 * 人脸鉴权签名
+	 */
+	@RequestMapping(value = "faceEventRegisterScan")
+	public void faceEventRegisterScan(MessageRequestEntity entity, HttpServletRequest request, HttpServletResponse response)
+			throws Exception {
+
+		response.setHeader("Access-Control-Allow-Origin", "*");
+		response.setContentType("text/html;charset=utf-8");
+		logger.info("下游上送的参数:" + entity);
+		Map<String, Object> map = new HashMap<String, Object>();
+		// 查询商户密钥
+		ChannleMerchantConfigKey keyinfo = quickPayService.getChannelConfigKey(entity.getV_mid());
+		String merchantKey = keyinfo.getMerchantkey();
+		logger.info("下游商户密钥:" + keyinfo);
+		String sign = SignatureUtil.getSign(beanToMap(entity), merchantKey, logger);
+		entity.setV_sign(sign);
+		// 返回页面参数
+		request.setCharacterEncoding("UTF-8");
+		request.setAttribute("temp", entity);
+		request.getRequestDispatcher("/quick/face_event_submit.jsp").forward(request, response);
+	}
+	/**
+	 * 人脸鉴权
+	 * @param entity
+	 * @param request
+	 * @param response
+	 */
+	@RequestMapping(value="faceEventRegister")
+	public void faceEventRegister(MessageRequestEntity entity,HttpServletRequest request, HttpServletResponse response) {
+		try {
+			logger.info("人脸识别进来了");
+			response.setHeader("Access-Control-Allow-Origin", "*");
+			response.setContentType("text/html;charset=utf-8");
+			Map<String, String> result = new HashMap<String, String>();
+
+			logger.info("下游上送参数:{}"+ entity);
+			if (!StringUtils.isEmpty(entity.getV_mid())) {
+				logger.info("下游上送签名串{}" + entity.getV_sign());
+				// 查询商户密钥
+				ChannleMerchantConfigKey keyinfo = quickPayService.getChannelConfigKey(entity.getV_mid());
+				// ------------------------需要改签名
+				String merchantKey = keyinfo.getMerchantkey();
+				SignatureUtil signUtil = new SignatureUtil();
+
+				Map map = BeanToMapUtil.convertBean(entity);
+
+				if (signUtil.checkSign(map, merchantKey, logger)) {
+					logger.info("对比签名成功");
+					result = quickPayService.faceEventRegister(entity, result);
+				
+					logger.info("短信响应信息:" + result);
+					MessAgeResponseEntity message = (MessAgeResponseEntity) BeanToMapUtil
+							.convertMap(MessAgeResponseEntity.class, result);
+					String sign = SignatureUtil.getSign(beanToMap(message), merchantKey, logger);
+					result.put("v_sign", sign);
+					outString(response, gson.toJson(result));
+				} else {
+					logger.error("签名错误!");
+					result.put("v_code", "02");
+					result.put("v_msg", "签名错误!");
+					outString(response, gson.toJson(result));
+				}
+
+			} else {
+				logger.error("上送交易参数空!");
+				result.put("v_code", "01");
+				result.put("v_msg", "上送交易参数空");
+				outString(response, gson.toJson(result));
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	/**
+	 * 九派人脸同步响应信息
+	 * 
+	 * @param request
+	 * @param response
+	 * @throws Exception
+	 */
+	@ResponseBody
+	@RequestMapping(value = "jpfaceEventUrl")
+	public void jpfaceEventUrl(HttpServletRequest request, HttpServletResponse response) {
+		try {
+			logger.info("九派人脸同步通知来了");
+			String orderId = request.getParameter("orderId");
+			OriginalOrderInfo originalInfo = Origi.get(orderId);
+			request.getSession();
+			try {
+				// 给下游手动返回支付结果
+				logger.info("pageUrl 商户页面 重定向：" + originalInfo.getPageUrl());
+				String path = originalInfo.getPageUrl();
+				logger.info("pageUrl 商户页面 重定向：" + path);
+				response.sendRedirect(path.replace(" ", ""));
+			} catch (Exception e) {
+				// TODO: handle exception
+				e.printStackTrace();
+			}
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+
+	}
+	
 }

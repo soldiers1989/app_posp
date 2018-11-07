@@ -56,7 +56,7 @@ package xdt.dto.jp;
 		/* 60 */ DateFormat dateFormat = new SimpleDateFormat("yyyyMMddhhmmss");
 		/* 61 */ String time = dateFormat.format(date);
 		/* 62 */ if (StringUtils.isBlank(req.getVersion()))
-			/* 63 */ req.setVersion("1.0");
+			/* 63 */ req.setVersion("1.2");
 		/* 64 */ req.setCharset("02");
 		/* 65 */ req.setSignType("RSA256");
 		/* 66 */ req.setRequestId(time);
