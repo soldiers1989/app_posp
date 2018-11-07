@@ -22,6 +22,9 @@ import sun.misc.BASE64Decoder;
 import xdt.dto.BaseUtil;
 import xdt.dto.gateway.util.HttpClient4Utils;
 import xdt.dto.gateway.util.ParamUtils;
+import xdt.dto.jp.MerchantUtil;
+import xdt.dto.jp.RSASignUtil;
+import xdt.dto.quickPay.util.cjtUtil;
 import xdt.dto.sd.ByteUtil;
 import xdt.dto.sd.HttpClientUtils;
 import xdt.dto.sd.SMd5;
@@ -1253,6 +1256,95 @@ public class aaa extends BaseAction{
 		return b.toString().substring(0, b.length()-1);
 	}
 	
+
+	
+	//开联通代付
+	@RequestMapping(value = "KLTDF")
+	public Map<String, String> KLTDF(HttpServletResponse response, HttpServletRequest request,CapSingleTransferDTO capSingleTransferDTO) throws Exception {
+		logger.info("#############开联通代付处理 开始#############");
+		Map<String, String> remap = new LinkedHashMap<String, String>();
+		Map<String, Object> map = new LinkedHashMap<String, Object>();
+		try {
+			net.sf.json.JSONObject json1 = new net.sf.json.JSONObject();
+			//json1.put("version", "");
+		    json1.put("merchantId", "903110153110001");//商户号
+		    //json1.put("transactType", "");
+		    json1.put("signType", "1");//签名类型，0：数字证书 1：md5
+
+		    net.sf.json.JSONObject json2 = new net.sf.json.JSONObject();
+			json2.put("mchtOrderNo", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//订单号
+		    json2.put("orderDateTime", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//订单时间，yyyyMMddHHmmss
+		    json2.put("accountNo", "6217991100013041275");//收款方账号
+		    json2.put("accountName", "田永寒");//收款方姓名
+		    json2.put("accountType", "1");//收款方账户类型1代表个人账户  2代表企业账户
+		    json2.put("bankNo", "000000000000");//款方开户行行号（电子联行号）对公需要校验，对私填写000000000000（12个0）
+		    json2.put("bankName", "邮储银行");//收款方开户行名称,个人账户只写银行名
+		    json2.put("amt", "100");//金额，正整数，单位为分
+		    json2.put("purpose", "shopping");//用途
+		    json2.put("notifyUrl", BaseUtil.url+"/aa/KLTDFHD.action");//交易结果通知地址
+		    
+		    map.put("head", json1);
+		    map.put("content", json2);
+		    
+		    JSONObject sendObject = JSONObject.fromObject(map);	
+	        String originSign = sendObject.toString();
+	        logger.info("参与签名的数据="+originSign);
+	        String signStr = kltUtil.addSign(originSign,"742fa3ffd050fb441763bf8fb6c0594f");
+	        logger.info("请求的参数="+signStr);
+	        String url = "https://ipay.chinasmartpay.cn/openapi/singlePayment/payment";
+	        //忽略SSL认证
+	        String resp = kltUtil.sendHttpPostRequest(url, signStr, false);
+	        logger.info("开联通代付响应信息="+resp);
+	        
+	        JSONObject reObject = JSONObject.fromObject(resp);
+	        String responseCode=reObject.getString("responseCode");//响应码，000000表示接口响应正常，其它表示失败
+	        String responseMsg=reObject.getString("responseMsg");//响应信息
+
+	        if(!responseCode.equals("000000")) {
+	        	logger.info(responseMsg);
+				remap.put("v_code", "15");
+				remap.put("v_msg", "请求失败，"+responseMsg);
+				
+				//补款
+				
+	        }
+	        
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return remap;
+	}
+	
+	//开联通代付回调测试
+	@RequestMapping(value = "KLTDFHD")
+	public Map<String, String> KLTDFHD(HttpServletRequest request, HttpServletResponse response) throws IOException {
+	    log.info("开联通代付异步来了！");	
+	    Map<String, String> remap=new HashMap<>();  
+	    try {
+	    	String orderno=request.getParameter("merchantOrderId");//订单号
+	    	String orderStatus=request.getParameter("orderStatus");//订单状态
+	    	String errorCode=request.getParameter("errorCode");//交易错误码
+	    	String errorMsg=request.getParameter("errorMsg");//交易错误信息
+	    	
+	    	logger.info("订单号="+orderno);
+	    	logger.info("订单状态="+orderStatus);//订单状态,0：处理中，1：成功，2：失败
+	    	logger.info("交易错误码="+errorCode);
+	    	logger.info("交易错误信息="+errorMsg);
+	    	
+	    	if(errorCode!=null&&errorCode!=""&&errorCode.equals("000000")) {
+	    		outString(response,"success");
+	    	}else {
+	    		outString(response,"fail");
+	    	}
+	    	
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return remap;
+	}
+
 	
 
 	//市民卡代付
@@ -1344,43 +1436,55 @@ public class aaa extends BaseAction{
 	//九派代付
 	@RequestMapping(value = "JPDF")
 	public Map<String, String> JPDF(HttpServletResponse response, HttpServletRequest request,CapSingleTransferDTO capSingleTransferDTO) throws Exception {
-		logger.info("#############市民卡代付处理 开始#############");
+		logger.info("#############九派代付处理 开始#############");
 		Map<String, String> remap = new LinkedHashMap<String, String>();
-		Map<String, Object> map = new LinkedHashMap<String, Object>();
+		Map<String, String> map = new LinkedHashMap<String, String>();
 		try {
-			SingleTransferDTO dataMap = new SingleTransferDTO();
+			/*SingleTransferDTO dataMap = new SingleTransferDTO();
 			//公共请求参数
-			dataMap.setCharset("02");// 字符集02：utf-8
-			dataMap.setVersion("1.0");// 版本号
-			dataMap.setMerchantId("xxxxxxxxxxxxx");// 商户号
-			dataMap.setRequestTime(new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//请求时间
-			dataMap.setRequestId(java.lang.String.valueOf(System.currentTimeMillis()));//请求编号，当日唯一
-			dataMap.setService("singleTransfer");//请求类型
-			dataMap.setSignType("RSA256");//签名类型
-
+//			dataMap.setCharset("02");// 字符集02：utf-8
+//			dataMap.setVersion("1.0");// 版本号
+			dataMap.setMerchantId("800000200020043");// 商户号
+//			dataMap.setRequestTime(new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//请求时间
+//			dataMap.setRequestId(java.lang.String.valueOf(System.currentTimeMillis()));//请求编号，当日唯一
+//			dataMap.setService("singleTransfer");//请求类型
+//			dataMap.setSignType("RSA256");//签名类型
 			//代付请求参数
 			dataMap.setMcSequenceNo(new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//商户交易流水
 			dataMap.setMcTransDateTime(new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//商户交易时间
 			dataMap.setOrderNo(new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//订单号
 			dataMap.setAmount("1");//交易金额,单位分
 			dataMap.setCardNo("6217991100013041275");//交易账号
-			dataMap.setAccName("田永寒");//账户户名
-			
-			/*dataMap.put("accType", "0");//账户类型
-			dataMap.put("lBnkNo", payRequest.getV_pmsBankNo());
-			dataMap.put("lBnkNam", bank.getBank_name());*/
+			dataMap.setAccName("田永寒");//账户户名			
 			dataMap.setCrdType("00");//银行卡类型
 			dataMap.setCallBackUrl(xdt.dto.transfer_accounts.util.PayUtil.jpNotifyUrl);//回调地址
 			dataMap.setRemark1("{\"mercUsage\":\"货款结算\"}");//交易备注,json字符串,用途选项有:货款结算、服务费结算、劳务报酬结算
-		    String merchantCert=new File(this.getClass().getResource("/").getPath()).getParentFile()
-					.getParentFile().getCanonicalPath() + "/ky/jp800010000020003.p12";//商户证书路径 .p12文件
-		    String merchantPass="xxxxxxxxxxxxx";//商户证书密码
+			//可空的
+//			dataMap.setAccType("0");//账户类型
+//			dataMap.setLBnkNo("123456");//收款人开户行行号
+//			dataMap.setLBnkNam("邮政储蓄银行");//收款人开户行名称
+//			dataMap.setValidPeriod("1212");//有效期
+//			dataMap.setCvv2("123");//CVV2
+//			dataMap.setCellPhone("15244166253");//手机号
+//			dataMap.setRemark("备注");//订单备注
+//			dataMap.setBnkRsv("附言");//银行附言
+//			dataMap.setCapUse("用途");//资金用途
+//			dataMap.setRemark2("元素2");//填充元素2
+//			dataMap.setRemark3("元素3");//填充元素3			
+			
+			String merchantCert=new File(this.getClass().getResource("/").getPath()).getParentFile()
+					.getParentFile().getCanonicalPath() + "/ky/800000200020043.p12";//商户证书路径 .p12文件
+		    String merchantPass="YyxuDa";//商户证书密码
 		    String rootcerPath=new File(this.getClass().getResource("/").getPath()).getParentFile()
-					.getParentFile().getCanonicalPath() + "/ky/jprootca.cer";//根证书路径  .cer文件
+					.getParentFile().getCanonicalPath() + "/ky/800000200020043.cer";//根证书路径  .cer文件
 		    String url="https://jd.jiupaipay.com/paygateway/mpsGate/mpsTransaction";//请求地址
+		    logger.info("加密的参数="+dataMap);
+		    logger.info("私钥证书路径="+merchantCert);
+		    logger.info("公钥证书路径="+rootcerPath);
+		    logger.info("证书密码="+merchantPass);
 			String resp= baseJiupayService.doSend(SINGLETRANSFER,dataMap,merchantCert,merchantPass,rootcerPath,url);
-			
-			
+			logger.info("九派代付响应信息="+resp);*/
+
 		} catch (Exception e) {
 			// TODO: handle exception
 			e.printStackTrace();
@@ -1388,57 +1492,53 @@ public class aaa extends BaseAction{
 		return remap;
 	}
 	
-	//开联通代付
-	@RequestMapping(value = "KLTDF")
-	public Map<String, String> KLTDF(HttpServletResponse response, HttpServletRequest request,CapSingleTransferDTO capSingleTransferDTO) throws Exception {
-		logger.info("#############开联通代付处理 开始#############");
+
+	//畅捷通直接支付请求接口
+	@RequestMapping(value = "CJKJ1")
+	public Map<String, String> CJKJ1(HttpServletResponse response, HttpServletRequest request,CapSingleTransferDTO capSingleTransferDTO) throws Exception {
+		logger.info("#############九派代付处理 开始#############");
 		Map<String, String> remap = new LinkedHashMap<String, String>();
-		Map<String, Object> map = new LinkedHashMap<String, Object>();
 		try {
-			net.sf.json.JSONObject json1 = new net.sf.json.JSONObject();
-			//json1.put("version", "");
-		    json1.put("merchantId", "903110153110001");//商户号
-		    //json1.put("transactType", "");
-		    json1.put("signType", "1");//签名类型，0：数字证书 1：md5
-
-		    net.sf.json.JSONObject json2 = new net.sf.json.JSONObject();
-			json2.put("mchtOrderNo", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//订单号
-		    json2.put("orderDateTime", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));//订单时间，yyyyMMddHHmmss
-		    json2.put("accountNo", "6217991100013041275");//收款方账号
-		    json2.put("accountName", "田永寒");//收款方姓名
-		    json2.put("accountType", "1");//收款方账户类型1代表个人账户  2代表企业账户
-		    json2.put("bankNo", "000000000000");//款方开户行行号（电子联行号）对公需要校验，对私填写000000000000（12个0）
-		    json2.put("bankName", "邮储银行");//收款方开户行名称,个人账户只写银行名
-		    json2.put("amt", "100");//金额，正整数，单位为分
-		    json2.put("purpose", "shopping");//用途
-		    json2.put("notifyUrl", BaseUtil.url+"/aa/KLTDFHD.action");//交易结果通知地址
-		    
-		    map.put("head", json1);
-		    map.put("content", json2);
-		    
-		    JSONObject sendObject = JSONObject.fromObject(map);	
-	        String originSign = sendObject.toString();
-	        logger.info("参与签名的数据="+originSign);
-	        String signStr = kltUtil.addSign(originSign,"742fa3ffd050fb441763bf8fb6c0594f");
-	        logger.info("请求的参数="+signStr);
-	        String url = "https://ipay.chinasmartpay.cn/openapi/singlePayment/payment";
-	        //忽略SSL认证
-	        String resp = kltUtil.sendHttpPostRequest(url, signStr, false);
-	        logger.info("开联通代付响应信息="+resp);
-	        
-	        JSONObject reObject = JSONObject.fromObject(resp);
-	        String responseCode=reObject.getString("responseCode");//响应码，000000表示接口响应正常，其它表示失败
-	        String responseMsg=reObject.getString("responseMsg");//响应信息
-
-	        if(!responseCode.equals("000000")) {
-	        	logger.info(responseMsg);
-				remap.put("v_code", "15");
-				remap.put("v_msg", "请求失败，"+responseMsg);
-				
-				//补款
-				
-	        }
-	        
+			Map<String, String> origMap = new HashMap<String, String>();
+			//公共参数
+			origMap.put("Service", "nmg_zft_api_quick_payment");// 支付接口名称
+			origMap.put("Version", "1.0");
+			origMap.put("PartnerId", "200000140001");//商户号			
+			origMap.put("InputCharset", cjtUtil.charset);// 字符集
+			origMap.put("TradeDate", new SimpleDateFormat("yyyyMMdd").format(new Date()));// 商户请求时间
+			origMap.put("TradeTime", new SimpleDateFormat("HHmmss").format(new Date()));// 商户请求时间
+//			origMap.put("Sign", "签名");// 签名
+//			origMap.put("SignType", "RSA");// 签名方式
+			//业务参数
+			origMap.put("TrxId", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));// 订单号
+			origMap.put("OrdrName", "an apple");// 商品名称
+			origMap.put("MerUserId", new SimpleDateFormat("yyyyMMddHHmmss").format(new Date()));// 用户标识
+			origMap.put("SellerId", "200001160097");// 商户编号
+			origMap.put("ExpiredTime", "90m");// 订单有效期
+			origMap.put("BkAcctTp", "01");// 卡类型（00 – 银行贷记卡;01 – 银行借记卡;）
+			origMap.put("BkAcctNo", cjtUtil.encrypt("6217991100013041275", cjtUtil.MERCHANT_PUBLIC_KEY, cjtUtil.charset));// 卡号
+			origMap.put("IDTp", "01");// 证件类型 （目前只支持身份证 01：身份证）
+			origMap.put("IDNo", cjtUtil.encrypt("370323199612093224", cjtUtil.MERCHANT_PUBLIC_KEY, cjtUtil.charset));// 证件号
+			origMap.put("CstmrNm", cjtUtil.encrypt("田永寒", cjtUtil.MERCHANT_PUBLIC_KEY, cjtUtil.charset));// 持卡人姓名
+			origMap.put("MobNo", cjtUtil.encrypt("15244166253", cjtUtil.MERCHANT_PUBLIC_KEY, cjtUtil.charset));// 银行预留手机号
+			origMap.put("TrxAmt", "0.1");// 交易金额,元
+			origMap.put("TradeType", "11");// 交易类型
+			origMap.put("NotifyUrl", BaseUtil.url+"/aa/CEDHD.action");//异步地址
+			//origMap.put("SmsFlag", "1");//短信发送标识0：不发送短信1：发送短信
+			logger.info("签名的参数="+origMap);
+			String resp=cjtUtil.gatewayPost(origMap, cjtUtil.charset, cjtUtil.MERCHANT_PRIVATE_KEY);
+			logger.info("返回的信息="+resp);
+			JSONObject reObject = JSONObject.fromObject(resp);	
+			String respCode=reObject.getString("AcceptStatus");//网关返回码.S接口调用受理成功.F接口调用受理失败
+			String RetCode=reObject.getString("RetCode");//业务返回码
+			String RetMsg=reObject.getString("RetMsg");//业务返回码描述
+			String AppRetcode=reObject.getString("AppRetcode");//应用返回码
+			String AppRetMsg=reObject.getString("AppRetMsg");//应用返回码描述
+			String Status=reObject.getString("Status");//交易状态
+			logger.info("业务返回码描述="+RetMsg);
+			logger.info("应用返回码描述="+AppRetMsg);
+			logger.info("交易状态="+Status);
+			
 		} catch (Exception e) {
 			// TODO: handle exception
 			e.printStackTrace();
@@ -1446,21 +1546,68 @@ public class aaa extends BaseAction{
 		return remap;
 	}
 	
-	//开联通代付回调测试
-	@RequestMapping(value = "KLTDFHD")
-	public Map<String, String> KLTDFHD(HttpServletRequest request, HttpServletResponse response) throws IOException {
-	    log.info("开联通代付异步来了！");	
+	//短信验证码重发接口
+	@RequestMapping(value = "CJfdx")
+	public Map<String, String> CJfdx1(HttpServletResponse response, HttpServletRequest request,CapSingleTransferDTO capSingleTransferDTO) throws Exception {
+		logger.info("#############短信验证码重发处理 开始#############");
+		Map<String, String> remap = new LinkedHashMap<String, String>();
+		Map<String, String> map = new LinkedHashMap<String, String>();
+		try {
+			Map<String, String> origMap = new HashMap<String, String>();
+			// 2.1 基本参数
+			//origMap = setCommonMap(origMap);
+			// 2.2 业务参数
+			origMap.put("Service", "nmg_api_quick_payment_resend");
+			origMap.put("TrxId", "2017030915102022");// 订单号
+			origMap.put("OriTrxId", "20170309131120");// 原业务请求订单号
+			origMap.put("TradeType", "auth_order");// 原业务订单类型
+			cjtUtil.gatewayPost(origMap, cjtUtil.charset, cjtUtil.MERCHANT_PRIVATE_KEY);
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return remap;
+	}
+	
+	//支付确认接口
+	@RequestMapping(value = "CJzfqr")
+	public Map<String, String> CJfdx(HttpServletResponse response, HttpServletRequest request,CapSingleTransferDTO capSingleTransferDTO) throws Exception {
+		logger.info("#############支付确认接口处理 开始#############");
+		Map<String, String> remap = new LinkedHashMap<String, String>();
+		Map<String, String> map = new LinkedHashMap<String, String>();
+		try {
+			Map<String, String> origMap = new HashMap<String, String>();
+			// 2.1 基本参数
+//			origMap = setCommonMap(origMap);
+//			origMap.put("Service", "nmg_api_quick_payment_smsconfirm");// 请求的接口名称
+			// 2.2 业务参数
+			String trxId = Long.toString(System.currentTimeMillis());		
+			origMap.put("TrxId", trxId);// 订单号
+
+			//origMap.put("TrxId", "101149785980144593760");// 订单号
+			origMap.put("OriPayTrxId", "1501123506844");// 原有支付请求订单号
+			origMap.put("SmsCode", "695535");// 短信验证码
+			cjtUtil.gatewayPost(origMap, cjtUtil.charset, cjtUtil.MERCHANT_PRIVATE_KEY);
+		} catch (Exception e) {
+			// TODO: handle exception
+			e.printStackTrace();
+		}
+		return remap;
+	}
+	
+	//回调测试
+	@RequestMapping(value = "CEDHD")
+	public Map<String, String> CEDHD(HttpServletRequest request, HttpServletResponse response) throws IOException {
+	    log.info("测试异步来了！");	
 	    Map<String, String> remap=new HashMap<>();  
 	    try {
-	    	String orderno=request.getParameter("merchantOrderId");//订单号
-	    	String orderStatus=request.getParameter("orderStatus");//订单状态
-	    	String errorCode=request.getParameter("errorCode");//交易错误码
-	    	String errorMsg=request.getParameter("errorMsg");//交易错误信息
+	    	String orderno=request.getParameter("inner_trade_no");//订单号
+	    	String orderStatus=request.getParameter("trade_status");//订单状态
+	    	String errorCode=request.getParameter("trade_amount");//
 	    	
 	    	logger.info("订单号="+orderno);
 	    	logger.info("订单状态="+orderStatus);//订单状态,0：处理中，1：成功，2：失败
-	    	logger.info("交易错误码="+errorCode);
-	    	logger.info("交易错误信息="+errorMsg);
+	    	logger.info("金额="+errorCode);
 	    	
 	    	if(errorCode!=null&&errorCode!=""&&errorCode.equals("000000")) {
 	    		outString(response,"success");
@@ -1474,5 +1621,4 @@ public class aaa extends BaseAction{
 		}
 		return remap;
 	}
-
 }

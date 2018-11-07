@@ -1,0 +1,109 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<!DOCTYPE mapper
+PUBLIC '-//mybatis.org//DTD Mapper 3.0//EN'
+'http://mybatis.org/dtd/mybatis-3-mapper.dtd'>
+<mapper namespace='xdt.mapping.PmsDangerControlTimeMapper'>
+
+	<resultMap type="xdt.model.PmsDangerControlTime" id="resultMap">
+		<id column="id" property="id" />
+		<result column="mercId" property="mercId" />
+		<result column="mercName" property="mercName" />
+		<result column="symbol" property="symbol" />
+		<result column="amount" property="amount" />
+		<result column="transactionTime" property="transactionTime" />
+		<result column="addtime" property="addtime" />
+		<result column="updateTime" property="updateTime" />
+		<result column="addAgentNumber" property="addAgentNumber" />
+		<result column="updateAgentNumber" property="updateAgentNumber" />
+		<result column="quotaType" property="quotaType" />
+		<result column="remarks" property="remarks" />
+		<result column="startDate" property="startDate" />
+		<result column="endDate" property="endDate" />
+	</resultMap>
+
+	<!-- 公用的判断条 -->
+	<sql id="configParamSql">
+					<if test="searchBean.mercId !=null  and  searchBean.mercId!=''">
+							and obj.mercId  like '%'||#{searchBean.mercId}||'%'
+						</if>
+					<if test="searchBean.mercName !=null  and  searchBean.mercName!=''">
+							and obj.mercName  like '%'||#{searchBean.mercName}||'%'
+						</if>
+					<if test="searchBean.symbol !=null  and  searchBean.symbol !=''">
+							and obj.symbol=#{searchBean.symbol}
+						</if>
+					<if test="searchBean.amount !=null  and  searchBean.amount !=''">
+							and obj.amount=#{searchBean.amount}
+						</if>
+					<if
+						test="searchBean.startDate !=null  and  searchBean.startDate!='' and searchBean.endDate !=null  and  searchBean.endDate!=''">
+						and substr(obj.addTime,0,10) between
+						#{searchBean.startDate} and #{searchBean.endDate}
+					</if>
+					<if test="searchBean.addtime !=null  and  searchBean.addtime!=''">
+							and obj.addtime=#{searchBean.addtime}
+						</if>
+					<if test="searchBean.updateTime !=null  and  searchBean.updateTime!=''">
+							and obj.updateTime=#{searchBean.updateTime}
+						</if>
+					<if test="searchBean.addAgentNumber !=null  and  searchBean.addAgentNumber!=''">
+							and obj.addAgentNumber=#{searchBean.addAgentNumber}
+						</if>
+					<if test="searchBean.updateAgentNumber !=null  and  searchBean.updateAgentNumber!=''">
+							and obj.updateAgentNumber=#{searchBean.updateAgentNumber}
+						</if>
+					<if test="searchBean.quotaType !=null  and  searchBean.quotaType!=''">
+							and obj.quotaType=#{searchBean.quotaType}
+						</if>
+					<if test="searchBean.remarks !=null  and  searchBean.remarks!=''">
+							and obj.remarks=#{searchBean.remarks}
+						</if>
+	</sql>
+	<select id="selectList" resultMap="resultMap" parameterType="xdt.model.PmsDangerControlTime">
+		select * from pms_danger_control_time
+		<where>
+			<if test="mercId !=null  and  mercId !=''">
+				and mercId=#{mercId}
+			</if>
+		</where>
+	</select>
+	<insert id="save" parameterType="xdt.model.PmsDangerControlTime">
+		<selectKey resultType="java.lang.Integer" keyProperty="id"
+			order="BEFORE">
+			select seq_pms_danger_control_time.NEXTVAL from dual
+		</selectKey>
+		<![CDATA[insert into pms_danger_control_time(mercId,mercName,symbol,amount,transactionTime,addtime,updateTime,addAgentNumber,updateAgentNumber,quotaType,remarks)
+		values(trim(#{mercId,jdbcType=VARCHAR}),trim(#{mercName,jdbcType=VARCHAR}),trim(#{symbol,jdbcType=VARCHAR}),trim(#{amount,jdbcType=VARCHAR}),trim(#{transactionTime,jdbcType=INTEGER}),trim(#{addtime,jdbcType=VARCHAR}),trim(#{updateTime,jdbcType=VARCHAR}),trim(#{addAgentNumber,jdbcType=VARCHAR}),trim(#{updateAgentNumber,jdbcType=VARCHAR}),trim(#{quotaType,jdbcType=VARCHAR}),trim(#{remarks,jdbcType=VARCHAR}))]]>
+	</insert>
+	
+	<delete id="delete" parameterType="java.lang.Integer">
+		delete from pms_danger_control_time
+		where id=#{id}
+	</delete>
+
+	<update id='update' parameterType='xdt.model.PmsDangerControlTime'>
+		update pms_danger_control_time set
+		mercName =
+		#{mercName,jdbcType=VARCHAR},
+		symbol =
+		#{symbol,jdbcType=VARCHAR},
+		amount =
+		#{amount,jdbcType=VARCHAR},
+		transactionTime =
+		#{transactionTime,jdbcType=VARCHAR},
+		addtime =
+		#{addtime,jdbcType=VARCHAR},
+		updateTime =
+		#{updateTime,jdbcType=VARCHAR},
+		addAgentNumber =
+		#{addAgentNumber,jdbcType=VARCHAR},
+		updateAgentNumber =
+		#{updateAgentNumber,jdbcType=VARCHAR},
+		quotaType =
+		#{quotaType,jdbcType=VARCHAR},
+		remarks =
+		#{remarks,jdbcType=VARCHAR}
+		where mercId=#{mercId,jdbcType=INTEGER}
+	</update>
+</mapper>
+

@@ -41,9 +41,9 @@ package xdt.dto.jp;
 			/* 45 */ resMap.remove("serverCert");
 			/* 46 */ resMap.remove("serverSign");
 			/* 47 */ res = BeanUtil.mapToStr(resMap);
-			/* 48 */ /*if (!(rsaSignUtil.verify(res, serverSign, serverCert, "UTF-8"))) {
-				 49  return "验签失败";
-				     }*/
+			/* 48 */ if (!(rsaSignUtil.verify(res, serverSign, serverCert, "UTF-8", serverSign))) {
+				/* 49 */ return "验签失败";
+				/*    */ }
 			/* 51 */ return BeanUtil.mapToJson(resMap);
 			/*    */ } catch (Exception e) {
 			/* 53 */ logger.info("调用paySdk服务发生异常", e);
@@ -56,7 +56,7 @@ package xdt.dto.jp;
 		/* 60 */ DateFormat dateFormat = new SimpleDateFormat("yyyyMMddhhmmss");
 		/* 61 */ String time = dateFormat.format(date);
 		/* 62 */ if (StringUtils.isBlank(req.getVersion()))
-			/* 63 */ req.setVersion("1.0");
+			/* 63 */ req.setVersion("1.2");
 		/* 64 */ req.setCharset("02");
 		/* 65 */ req.setSignType("RSA256");
 		/* 66 */ req.setRequestId(time);

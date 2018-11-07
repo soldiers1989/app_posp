@@ -113,4 +113,11 @@ public interface IQuickPayService {
 	public Map<String, String> selectCard(MessageRequestEntity entity);
 	
 	int UpdatePmsMerchantInfo(OriginalOrderInfo originalInfo) throws Exception;
+	
+	//快捷支付绑卡
+	Map<String, String> quickCard(MessageRequestEntity entity, Map<String, String> result);
+	//快捷支付绑卡短信验证
+	Map<String, String> quickCardInit(ConsumeRequestEntity entity, Map<String, String> result);
+	//人脸识别
+	Map<String, String>  faceEventRegister(MessageRequestEntity entity,Map<String, String> result);
 }
